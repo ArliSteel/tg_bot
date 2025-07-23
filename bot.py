@@ -174,5 +174,9 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    app = asyncio.run(main())  # сначала вызываем main()
-    web.run_app(app, port=10000)  # потом передаём app в run_app()
+
+    async def start():
+        app = await main()
+        web.run_app(app, port=10000)
+
+    asyncio.run(start())
