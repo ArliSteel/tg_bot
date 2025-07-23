@@ -222,8 +222,7 @@ async def setup_application():
 
     await app.initialize()
     await app.bot.set_webhook(
-        url=WEBHOOK_URL,
-        allowed_updates=["message", "callback_query"]
+        url=WEBHOOK_URL
     )
     return app
 
