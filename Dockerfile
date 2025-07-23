@@ -1,23 +1,18 @@
-# Используем официальный Python-образ
 FROM python:3.11-slim
 
-# Устанавливаем зависимости системы, включая ffmpeg
+# Установка зависимостей ОС
 RUN apt-get update && \
     apt-get install -y ffmpeg gcc libffi-dev libsndfile1 && \
     apt-get clean
 
-# Создаём рабочую директорию
+# Установка зависимостей Python
 WORKDIR /app
-
-# Копируем файлы проекта
 COPY . .
-
-# Устанавливаем Python-зависимости
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Указываем порт, который будет слушать приложение
+# Экспонируем порт (Render ожидает, что слушается 10000)
 EXPOSE 10000
 
-# Команда для запуска бота
+# ⬇️ Важно: запуск именно aiohttp-сервера
 CMD ["python", "bot.py"]
