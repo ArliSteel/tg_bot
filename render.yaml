@@ -1,12 +1,15 @@
 services:
-  - type: worker
-    name: telegram-neuro-assistant
+  - type: web
+    name: telegram-bot
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
       - key: TELEGRAM_TOKEN
-        sync: false
+        value: <ТВОЙ_ТОКЕН>
+      - key: YANDEX_API_KEY
+        value: <ТОКЕН_YANDEX>
+      - key: YANDEX_FOLDER_ID
+        value: <FOLDER_ID_YANDEX>
+      - key: WEBHOOK_URL
+        value: <URL_ТВОЕГО_БОТА>
