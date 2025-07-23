@@ -173,4 +173,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(web.run_app(main(), port=10000))
+    app = asyncio.run(main())  # сначала вызываем main()
+    web.run_app(app, port=10000)  # потом передаём app в run_app()
