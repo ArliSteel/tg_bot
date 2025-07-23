@@ -239,23 +239,26 @@ async def main():
 
 
 if __name__ == "__main__":
-    import asyncio
+   import asyncio
+from aiohttp import web
 
-    async def full_start():
-        # 1. Регистрируем webhook (только если есть reset_webhook.py)
-        try:
-            from reset_webhook import reset
-            await reset()
-        except ImportError:
-            logger.info("reset_webhook не найден — пропускаем перерегистрацию.")
+async def full_start():
+    # Асинхронные задачи перед стартом сервера
+    try:
+        from reset_webhook import reset
+        await reset()
+    except ImportError:
+        logger.info("reset_webhook не найден — пропускаем перерегистрацию.")
 
-        # 2. Запускаем Telegram + aiohttp
-        global application
-        application = await setup_application()
+    # Создаем приложение
+    global application
+    application = await setup_application()
 
-        app = web.Application()
-        app.router.add_post("/", handle_webhook)
+    app = web.Application()
+    app.router.add_post("/", handle_webhook)
 
-        web.run_app(app, port=10000)
+    return app
 
-    asyncio.run(full_start())
+if __name__ == "__main__":
+    app = asyncio.run(full_start())  # Запускаем async часть и получаем app
+    web.run_app(app, port=10000)     # Запускаем веб-сервер синхронно
