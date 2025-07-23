@@ -162,21 +162,16 @@ async def setup_application():
     return app
 
 async def main():
-    """Точка входа"""
     global application
     application = await setup_application()
     
-    # Настройка aiohttp приложения
     app = web.Application()
     app.router.add_post("/", handle_webhook)
-    
     return app
 
 if __name__ == "__main__":
     import asyncio
+    loop = asyncio.get_event_loop()
+    app = loop.run_until_complete(main())
+    web.run_app(app, port=10000)
 
-    async def start():
-        app = await main()
-        web.run_app(app, port=10000)
-
-    asyncio.run(start())
