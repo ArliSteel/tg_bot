@@ -243,3 +243,14 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     app = loop.run_until_complete(main())
     web.run_app(app, port=10000)
+
+if __name__ == "__main__":
+    import asyncio
+
+    from reset_webhook import reset
+    asyncio.run(reset())
+    
+    # После регистрации — запусти бота как обычно
+    loop = asyncio.get_event_loop()
+    app = loop.run_until_complete(main())
+    web.run_app(app, port=10000)
