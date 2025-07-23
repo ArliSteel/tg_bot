@@ -154,27 +154,53 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    voice: Voice = update.message.voice
-    file: File = await context.bot.get_file(voice.file_id)
+    logger.info("Получено голосовое сообщение")
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        ogg_path = os.path.join(tmp_dir, "voice.ogg")
-        wav_path = os.path.join(tmp_dir, "voice.wav")
+    try:
+        voice: Voice = update.message.voice
+        file: File = await context.bot.get_file(voice.file_id)
 
-        await file.download_to_drive(ogg_path)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ogg_path = os.path.join(tmp_dir, "voice.ogg")
+            wav_path = os.path.join(tmp_dir, "voice.wav")
 
-        sound = AudioSegment.from_file(ogg_path)
-        sound.export(wav_path, format="wav")
+            # Скачивание .ogg файла
+            await file.download_to_drive(ogg_path)
+            logger.info(f"Голосовое сообщение сохранено: {ogg_path}")
 
-        text = await transcribe_voice(wav_path)
+            # Проверка ffmpeg
+            ffmpeg_path = subprocess.getoutput("which ffmpeg")
+            logger.info(f"ffmpeg путь: {ffmpeg_path}")
+            if not ffmpeg_path:
+                await update.message.reply_text("⚠️ ffmpeg не найден в системе.")
+                return
 
-        if not text:
-            await update.message.reply_text("Не удалось распознать сообщение. Попробуйте еще раз.")
-            return
+            # Конвертация .ogg → .wav
+            try:
+                AudioSegment.converter = ffmpeg_path  # явно указываем путь
+                sound = AudioSegment.from_file(ogg_path)
+                sound.export(wav_path, format="wav")
+                logger.info(f"Файл сконвертирован в wav: {wav_path}")
+            except Exception as e:
+                logger.error(f"Ошибка при конвертации аудио: {e}")
+                await update.message.reply_text("⚠️ Не удалось обработать аудио. Проверь формат.")
+                return
 
-        logger.info(f"Распознанный текст: {text}")
-        reply = await YandexGPTClient.generate_response(text)
-        await update.message.reply_text(reply)
+            # Распознавание речи
+            text = await transcribe_voice(wav_path)
+            logger.info(f"Результат распознавания: '{text}'")
+
+            if not text:
+                await update.message.reply_text("🤷 Не удалось распознать речь. Попробуйте говорить чётче или короче.")
+                return
+
+            # Генерация ответа
+            reply = await YandexGPTClient.generate_response(text)
+            await update.message.reply_text(reply)
+
+    except Exception as e:
+        logger.exception(f"Ошибка при обработке голосового: {e}")
+        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения. Мы уже разбираемся 🛠️")
 
 
 # Вебхук
