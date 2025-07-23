@@ -240,17 +240,22 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    loop = asyncio.get_event_loop()
-    app = loop.run_until_complete(main())
-    web.run_app(app, port=10000)
 
-if __name__ == "__main__":
-    import asyncio
+    async def full_start():
+        # 1. Регистрируем webhook (только если есть reset_webhook.py)
+        try:
+            from reset_webhook import reset
+            await reset()
+        except ImportError:
+            logger.info("reset_webhook не найден — пропускаем перерегистрацию.")
 
-    from reset_webhook import reset
-    asyncio.run(reset())
-    
-    # После регистрации — запусти бота как обычно
-    loop = asyncio.get_event_loop()
-    app = loop.run_until_complete(main())
-    web.run_app(app, port=10000)
+        # 2. Запускаем Telegram + aiohttp
+        global application
+        application = await setup_application()
+
+        app = web.Application()
+        app.router.add_post("/", handle_webhook)
+
+        web.run_app(app, port=10000)
+
+    asyncio.run(full_start())
