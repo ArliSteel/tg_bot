@@ -206,7 +206,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Вебхук
 async def handle_webhook(request):
     data = await request.json()
-    logger.debug(f"Webhook data: {data}")
+    logger.warning(f"== RAW TELEGRAM UPDATE ==\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return web.Response()
