@@ -19,3 +19,4 @@ typing-inspection==0.4.1
 typing_extensions==4.14.1
 aiohttp
 httpx==0.28.1
+pydub==0.25.1
