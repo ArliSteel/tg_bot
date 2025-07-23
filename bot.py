@@ -1,4 +1,5 @@
 import os
+import json
 import httpx
 import logging
 from aiohttp import web
@@ -6,78 +7,168 @@ from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 # Настройка логов
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Переменные окружения
+# Загрузка конфигов
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
 
-# URL для YandexGPT
+# Конфигурация салона (можно вынести в отдельный JSON)
+SALON_INFO = {
+    "name": "Lumiere",
+    "address": "Москва, ул. Тверская, 18",
+    "contacts": "+7 (495) 123-45-67",
+    "working_hours": "10:00-22:00 (без выходных)",
+    "services": {
+        "Женские стрижки": "от 2500₽",
+        "Мужские стрижки": "от 1800₽",
+        "Окрашивание волос": "от 5000₽",
+        "Маникюр": "от 2000₽",
+        "Педикюр": "от 2500₽",
+        "Детилинг (базовый)": "от 5000₽",
+        "Детилинг (премиум)": "от 15000₽"
+    }
+}
+
+# Системный промпт
+SYSTEM_PROMPT = f"""
+Ты ассистент салона красоты и детейлинга "{SALON_INFO['name']}".
+
+**Контактная информация:**
+- Адрес: {SALON_INFO['address']}
+- Телефон: {SALON_INFO['contacts']}
+- Режим работы: {SALON_INFO['working_hours']}
+
+**Основные услуги и цены:**
+{json.dumps(SALON_INFO['services'], indent=2, ensure_ascii=False)}
+
+**Правила общения:**
+1. Вежливый и профессиональный тон
+2. Не давать медицинских рекомендаций
+3. На вопросы не по теме отвечать: "Этот вопрос лучше уточнить у администратора"
+4. На агрессию реагировать спокойно
+5. Все цены указывать как ориентировочные
+
+**Важно:**
+- Если вопрос про акции - отвечай "Актуальные акции уточняйте по телефону"
+- Не придумывай несуществующие услуги
+- На запрос записи предлагай позвонить по телефону салона
+"""
+
+# Настройки YandexGPT
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+MODEL_CONFIG = {
+    "temperature": 0.3,
+    "max_tokens": 300
+}
 
-# Функция для запроса к YandexGPT
-async def ask_yandex_gpt(prompt: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {YANDEX_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",  # или yandexgpt
-        "completionOptions": {
-            "stream": False,
-            "temperature": 0.7,
-            "maxTokens": 150
-        },
-        "messages": [
-            {"role": "system", "text": "Ты полезный ассистент для клиентов бьюти-салона или детейлинг-центра."},
-            {"role": "user", "text": prompt}
-        ]
-    }
+class YandexGPTClient:
+    @staticmethod
+    async def generate_response(user_message: str) -> str:
+        """Генерация ответа через YandexGPT API"""
+        headers = {
+            "Authorization": f"Bearer {YANDEX_API_KEY}",
+            "x-folder-id": YANDEX_FOLDER_ID,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt",
+            "completionOptions": {
+                "stream": False,
+                "temperature": MODEL_CONFIG["temperature"],
+                "maxTokens": MODEL_CONFIG["max_tokens"]
+            },
+            "messages": [
+                {
+                    "role": "system",
+                    "text": SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "text": user_message
+                }
+            ]
+        }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(YANDEX_GPT_URL, headers=headers, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(YANDEX_GPT_URL, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                return data['result']['alternatives'][0]['message']['text'].strip()
+                
+        except Exception as e:
+            logger.error(f"YandexGPT error: {str(e)}")
+            return "Извините, произошла техническая ошибка. Пожалуйста, попробуйте позже."
 
-    if response.status_code == 200:
-        data = response.json()
-        return data['result']['alternatives'][0]['message']['text'].strip()
-    else:
-        logging.error(f"YandexGPT error: {response.status_code} - {response.text}")
-        return "Произошла ошибка при обращении к нейросети."
-
-# Хендлер /start
+# Telegram Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я нейроассистент бьюти-салона и детейлинг-центра.")
+    """Обработчик команды /start"""
+    welcome_msg = (
+        f"Добро пожаловать в {SALON_INFO['name']}!\n\n"
+        f"Я помогу вам с информацией о наших услугах.\n"
+        f"Телефон для записи: {SALON_INFO['contacts']}"
+    )
+    await update.message.reply_text(welcome_msg)
 
-# Хендлер сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик текстовых сообщений"""
     user_text = update.message.text
-    logging.info(f"Вопрос: {user_text}")
-    reply = await ask_yandex_gpt(user_text)
-    logging.info(f"Ответ: {reply}")
+    logger.info(f"Received message: {user_text}")
+    
+    reply = await YandexGPTClient.generate_response(user_text)
+    
+    # Фильтрация нежелательных фраз
+    banned_phrases = ["лечебн", "медицинск", "гарантируем", "100%"]
+    if any(phrase in reply.lower() for phrase in banned_phrases):
+        reply = "Этот вопрос требует консультации специалиста."
+    
     await update.message.reply_text(reply)
 
-# Webhook обработка
-async def handle(request):
+# Webhook Handler
+async def handle_webhook(request):
+    """Обработчик вебхука"""
     data = await request.json()
-    logging.info(f"Получен апдейт: {data}")
+    logger.debug(f"Webhook data: {data}")
+    
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return web.Response()
 
-# Основной запуск
+# Инициализация и запуск
+async def setup_application():
+    """Настройка приложения"""
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Регистрация обработчиков
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Настройка вебхука
+    await app.initialize()
+    await app.bot.set_webhook(
+        url=WEBHOOK_URL,
+        allowed_updates=["message", "callback_query"]
+    )
+    
+    return app
+
 async def main():
+    """Точка входа"""
     global application
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    await application.initialize()
-    await application.bot.set_webhook(url=WEBHOOK_URL)
-
+    application = await setup_application()
+    
+    # Настройка aiohttp приложения
     app = web.Application()
-    app.router.add_post("/", handle)
+    app.router.add_post("/", handle_webhook)
+    
     return app
 
 if __name__ == "__main__":
