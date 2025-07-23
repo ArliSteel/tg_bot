@@ -1,5 +1,5 @@
 import os
-import openai
+from openai import OpenAI
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
@@ -9,9 +9,10 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
-
 logging.basicConfig(level=logging.INFO)
+
+# Инициализируем клиента с ключом
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я нейроассистент.")
@@ -20,8 +21,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     logging.info(f"Запрос к OpenAI: {user_text}")
 
-    # Вызов OpenAI Chat Completion (gpt-3.5-turbo)
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "Ты полезный ассистент для клиентов бьюти-салона или детейлинг-центра."},
@@ -57,4 +57,5 @@ async def main():
     return app
 
 if __name__ == "__main__":
-    web.run_app(main(), port=10000)
+    import asyncio
+    asyncio.run(web.run_app(main(), port=10000))
