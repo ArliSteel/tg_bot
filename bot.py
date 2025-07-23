@@ -2,15 +2,20 @@ import os
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler
+import logging
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # URL Render
+
+# Включаем логирование
+logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я нейроассистент.")
 
 async def handle(request):
     data = await request.json()
+    logging.info(f"Получен апдейт: {data}")  # Логируем входящий апдейт
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return web.Response()
@@ -30,6 +35,4 @@ async def main():
     return app
 
 if __name__ == "__main__":
-    import logging
-    logging.basicConfig(level=logging.INFO)
     web.run_app(main(), port=10000)
