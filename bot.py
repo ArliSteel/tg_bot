@@ -1,3 +1,4 @@
+import asyncio  # Добавьте эту строку в самый верх файла
 import os
 import json
 import httpx
@@ -125,4 +126,14 @@ if __name__ == "__main__":
     logger.info(f"Bot token: {BOT_TOKEN[:5]}...{BOT_TOKEN[-5:]}")
     logger.info(f"Webhook URL: {WEBHOOK_URL}")
     
-    web.run_app(asyncio.run(main()), port=10000, access_log=logger)
+    try:
+        # Создаем event loop вручную
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Запускаем приложение
+        app = loop.run_until_complete(main())
+        web.run_app(app, port=10000, access_log=logger)
+    except Exception as e:
+        logger.critical(f"Fatal error: {str(e)}")
+        exit(1)
