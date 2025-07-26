@@ -1,13 +1,10 @@
-import asyncio  # Добавьте эту строку в самый верх файла
 import os
 import json
 import httpx
 import logging
-import tempfile
-import subprocess
+import asyncio
 from aiohttp import web
-from pydub import AudioSegment
-from telegram import Update, Bot, File, Voice
+from telegram import Update, Bot
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 # Настройка логов
@@ -23,11 +20,6 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
 
-# Проверка переменных
-if not all([BOT_TOKEN, WEBHOOK_URL, YANDEX_API_KEY, YANDEX_FOLDER_ID]):
-    logger.error("Отсутствуют необходимые переменные окружения!")
-    exit(1)
-
 # Конфигурация салона
 SALON_INFO = {
     "name": "Right.style89 | Студия восстановления автомобилей",
@@ -41,7 +33,17 @@ SALON_INFO = {
     }
 }
 
-SYSTEM_PROMPT = f"""..."""  # Ваш промпт без изменений
+SYSTEM_PROMPT = f"""
+Ты ассистент салона по детейлингу автомобилей "{SALON_INFO['name']}".
+Контакт: {SALON_INFO['contacts']}
+Адрес: {SALON_INFO['address']}
+Работаем: {SALON_INFO['working_hours']}
+
+Правила:
+1. Отвечай только по теме детейлинга
+2. Цены указывай как ориентировочные
+3. На вопросы не по теме говори: "Уточните у администратора"
+"""
 
 class YandexGPTClient:
     @staticmethod
@@ -68,72 +70,60 @@ class YandexGPTClient:
             logger.error(f"YandexGPT error: {str(e)}")
             return "⚠️ Произошла ошибка. Попробуйте позже."
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"Добро пожаловать в {SALON_INFO['name']}!\n"
+        f"Контакты: {SALON_INFO['contacts']}"
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         text = update.message.text
         logger.info(f"Вопрос: {text}")
         reply = await YandexGPTClient.generate_response(text)
         await update.message.reply_text(reply)
     except Exception as e:
-        logger.error(f"Text handler error: {e}")
-        await update.message.reply_text("🔧 Техническая ошибка. Мы уже работаем над исправлением.")
+        logger.error(f"Error: {e}")
+        await update.message.reply_text("🔧 Техническая ошибка.")
 
-async def health_check(request):
-    """Для мониторинга работы"""
-    return web.Response(text="Bot is alive")
+async def handle_webhook(request):
+    data = await request.json()
+    logger.info(f"Incoming update: {data.get('update_id')}")
+    
+    application = request.app['bot_app']
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return web.Response()
 
-async def setup_application():
-    """Инициализация бота с обработкой ошибок"""
-    try:
-        app = Application.builder().token(BOT_TOKEN).build()
-        
-        # Регистрация обработчиков
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-        
-        # Проверка вебхука
-        bot = Bot(token=BOT_TOKEN)
-        webhook_info = await bot.get_webhook_info()
-        logger.info(f"Current webhook: {webhook_info.url}")
-        
-        if webhook_info.url != WEBHOOK_URL:
-            logger.info("Updating webhook...")
-            await bot.set_webhook(WEBHOOK_URL)
-        
-        return app
-    except Exception as e:
-        logger.critical(f"Failed to setup application: {e}")
-        raise
+async def setup_bot():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Проверка вебхука
+    bot = Bot(token=BOT_TOKEN)
+    webhook_info = await bot.get_webhook_info()
+    logger.info(f"Current webhook: {webhook_info.url}")
+    
+    if webhook_info.url != WEBHOOK_URL:
+        logger.info("Setting new webhook...")
+        await bot.set_webhook(WEBHOOK_URL)
+    
+    return app
 
-async def main():
-    """Точка входа с обработкой ошибок"""
-    try:
-        app = web.Application()
-        app.router.add_post("/", handle_webhook)
-        app.router.add_get("/health", health_check)
-        
-        global application
-        application = await setup_application()
-        
-        return app
-    except Exception as e:
-        logger.critical(f"Failed to start: {e}")
-        exit(1)
+async def init_app():
+    """Инициализация приложения"""
+    bot_app = await setup_bot()
+    
+    app = web.Application()
+    app['bot_app'] = bot_app
+    app.router.add_post("/", handle_webhook)
+    app.router.add_get("/health", lambda r: web.Response(text="OK"))
+    
+    return app
 
 if __name__ == "__main__":
-    # Усиленное логирование при старте
-    logger.info("Starting bot with config:")
-    logger.info(f"Bot token: {BOT_TOKEN[:5]}...{BOT_TOKEN[-5:]}")
-    logger.info(f"Webhook URL: {WEBHOOK_URL}")
-    
-    try:
-        # Создаем event loop вручную
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Запускаем приложение
-        app = loop.run_until_complete(main())
-        web.run_app(app, port=10000, access_log=logger)
-    except Exception as e:
-        logger.critical(f"Fatal error: {str(e)}")
-        exit(1)
+    logger.info("Starting bot...")
+    loop = asyncio.get_event_loop()
+    app = loop.run_until_complete(init_app())
+    web.run_app(app, host="0.0.0.0", port=10000)
