@@ -86,6 +86,10 @@ async def init_app():
 # Точка входа
 # =======================
 if __name__ == "__main__":
-    logger.info("🚀 Запуск бота...")
-    app = asyncio.run(init_app())
+    import asyncio
+    from aiohttp import web
+
+    loop = asyncio.get_event_loop()
+    app = loop.run_until_complete(init_app())
     web.run_app(app, host="0.0.0.0", port=10000)
+
