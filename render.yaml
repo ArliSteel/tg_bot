@@ -12,4 +12,4 @@ services:
       - key: YANDEX_FOLDER_ID
         value: <FOLDER_ID_YANDEX>
       - key: WEBHOOK_URL
-        value: <URL_ТВОЕГО_БОТА>
+        value: https://tg-bot-cfkx.onrender.com/webhook
