@@ -6,6 +6,10 @@ services:
     dockerfilePath: ./Dockerfile
     envVars:
       - key: TELEGRAM_TOKEN
-        value: <ТВОЙ_ТОКЕН>
+        value: "<ТВОЙ_ТОКЕН>"
       - key: WEBHOOK_URL
-        value: <URL_БОТА>/webhook
+        value: "https://tg-bot-cfkx.onrender.com/webhook"
+      - key: YANDEX_API_KEY
+        value: "<ТОКЕН_YANDEX>"
+      - key: YANDEX_FOLDER_ID
+        value: "<FOLDER_ID_YANDEX>"

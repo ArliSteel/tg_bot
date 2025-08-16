@@ -1,19 +1,19 @@
 FROM python:3.11-slim
 
-# Установка системных зависимостей
+# Установка зависимостей ОС
 RUN apt-get update && \
     apt-get install -y ffmpeg gcc libffi-dev libsndfile1 && \
     apt-get clean
 
-# Работаем в директории /app
+# Работа в директории /app
 WORKDIR /app
 COPY . .
 
-# Установка Python-зависимостей
+# Установка зависимостей Python
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Экспонируем порт Render (10000)
+# Экспонируем порт 10000 (Render ожидает именно этот порт)
 EXPOSE 10000
 
 # Запуск бота
