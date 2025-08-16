@@ -1,18 +1,20 @@
 FROM python:3.11-slim
 
-# Установка зависимостей ОС
+# Установка системных зависимостей
 RUN apt-get update && \
     apt-get install -y ffmpeg gcc libffi-dev libsndfile1 && \
     apt-get clean
 
-# Установка зависимостей Python
+# Работаем в директории /app
 WORKDIR /app
 COPY . .
+
+# Установка Python-зависимостей
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Экспонируем порт (Render ожидает, что слушается 10000)
+# Экспонируем порт Render (10000)
 EXPOSE 10000
 
-# ⬇️ Важно: запуск именно aiohttp-сервера
+# Запуск бота
 CMD ["python", "bot.py"]

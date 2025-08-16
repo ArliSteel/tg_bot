@@ -7,9 +7,5 @@ services:
     envVars:
       - key: TELEGRAM_TOKEN
         value: <ТВОЙ_ТОКЕН>
-      - key: YANDEX_API_KEY
-        value: <ТОКЕН_YANDEX>
-      - key: YANDEX_FOLDER_ID
-        value: <FOLDER_ID_YANDEX>
       - key: WEBHOOK_URL
-        value: https://tg-bot-cfkx.onrender.com/webhook
+        value: <URL_БОТА>/webhook
