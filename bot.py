@@ -114,6 +114,26 @@ class YandexGPTClient:
             logger.error(f"YandexGPT error: {str(e)}")
             return "Извините, произошла техническая ошибка. Пожалуйста, попробуйте позже."
 
+# Инициализация бота (глобальная переменная)
+bot_app = None
+
+async def initialize_bot():
+    """Инициализация бота один раз при старте"""
+    global bot_app
+    bot_app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Регистрация обработчиков
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Инициализация
+    await bot_app.initialize()
+    await bot_app.bot.set_webhook(
+        WEBHOOK_URL,
+        allowed_updates=["message", "callback_query"]
+    )
+    logger.info(f"Webhook set to: {WEBHOOK_URL}")
+
 # Telegram Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -145,8 +165,9 @@ async def handle_webhook(request):
         data = await request.json()
         logger.info(f"Webhook received: {data.get('update_id')}")
         
-        # Получаем bot_app из контекста приложения
-        bot_app = request.app['bot_app']
+        if bot_app is None:
+            return web.Response(text="Bot not initialized", status=500)
+        
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
         
@@ -154,39 +175,19 @@ async def handle_webhook(request):
         
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-        return web.Response(text="OK")  # Всегда возвращаем OK для Telegram
+        return web.Response(text="OK")
 
 # Health check
 async def handle_health(request):
     return web.Response(text="Bot is alive")
 
-# Настройка бота
-async def setup_bot():
-    """Инициализация бота"""
-    app = Application.builder().token(BOT_TOKEN).build()
-    
-    # Регистрация обработчиков
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    return app
-
 # Инициализация приложения
 async def init_app():
     """Инициализация aiohttp приложения"""
-    bot_app = await setup_bot()
-    
-    # Установка вебхука
-    async with bot_app:
-        await bot_app.initialize()
-        await bot_app.bot.set_webhook(
-            WEBHOOK_URL,
-            allowed_updates=["message", "callback_query"]
-        )
-        logger.info(f"Webhook set to: {WEBHOOK_URL}")
+    # Инициализируем бота
+    await initialize_bot()
     
     app = web.Application()
-    app['bot_app'] = bot_app
     app.router.add_post("/", handle_webhook)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/", handle_health)
