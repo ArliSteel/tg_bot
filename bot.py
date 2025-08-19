@@ -33,19 +33,24 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Вебхук - обработка POST запросов от Telegram
 async def handle_webhook(request):
     try:
+        # Логируем сырые данные для отладки
         data = await request.json()
-        logger.info(f"Вебхук получен: {data.get('update_id')}")
+        logger.info(f"Received webhook data: {json.dumps(data, indent=2)}")
         
+        # Создаем Update объект
         update = Update.de_json(data, request.app['bot_app'].bot)
+        
+        # Обрабатываем апдейт
         await request.app['bot_app'].process_update(update)
-        return web.Response(text="OK")
+        
+        return web.Response(text="OK", status=200)
+        
     except Exception as e:
-        logger.error(f"Ошибка webhook: {e}")
-        return web.Response(status=500, text="Error")
+        logger.error(f"Webhook error: {str(e)}", exc_info=True)
+        return web.Response(text=f"Error: {str(e)}", status=500)
 
 # Универсальный обработчик для GET/HEAD запросов
 async def handle_health_check(request):
-    logger.info(f"Health check: {request.method} {request.path}")
     return web.Response(text="Bot is alive")
 
 # Настройка бота
@@ -58,25 +63,12 @@ async def setup_bot():
 # Инициализация aiohttp
 async def init_app():
     bot_app = await setup_bot()
-
-    # Установка вебхука
-    async with bot_app:
-        webhook_info = await bot_app.bot.get_webhook_info()
-        logger.info(f"Текущий вебхук: {webhook_info.url}")
-        
-        if webhook_info.url != WEBHOOK_URL:
-            logger.info(f"Устанавливаю вебхук: {WEBHOOK_URL}")
-            await bot_app.bot.set_webhook(
-                WEBHOOK_URL,
-                allowed_updates=["message", "callback_query"]
-            )
-
     app = web.Application()
     app['bot_app'] = bot_app
     
-    # КРИТИЧЕСКИЕ ИЗМЕНЕНИЯ:
-    app.router.add_post("/", handle_webhook)  # POST - от Telegram
-    app.router.add_route("*", "/", handle_health_check)  # Все методы для корня
+    # Маршруты
+    app.router.add_post("/", handle_webhook)
+    app.router.add_route("*", "/", handle_health_check)
     app.router.add_get("/health", handle_health_check)
     
     return app
