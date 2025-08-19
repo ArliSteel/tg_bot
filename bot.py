@@ -57,7 +57,7 @@ async def init_app():
 
     app = web.Application()
     app['bot_app'] = bot_app
-    app.router.add_post("/webhook", handle_webhook)
+    app.router.add_post("/", handle_webhook)
     app.router.add_get("/health", lambda r: web.Response(text="OK"))
     return app
 
