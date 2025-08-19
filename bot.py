@@ -7,7 +7,10 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Логи
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Переменные окружения
@@ -20,23 +23,30 @@ if not BOT_TOKEN or not WEBHOOK_URL:
 
 # Обработчики
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает! Отправьте сообщение.")
+    await update.message.reply_text("✅ Бот работает! Отправьте сообщение.")
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     logger.info(f"Получено сообщение: {text}")
-    await update.message.reply_text(f"Вы написали: {text}")
+    await update.message.reply_text(f"🔍 Вы написали: {text}")
 
-# Вебхук
+# Вебхук - обработка POST запросов от Telegram
 async def handle_webhook(request):
     try:
         data = await request.json()
+        logger.info(f"Вебхук получен: {data.get('update_id')}")
+        
         update = Update.de_json(data, request.app['bot_app'].bot)
         await request.app['bot_app'].process_update(update)
-        return web.Response(text="OK")  # обязательно 200 OK
+        return web.Response(text="OK")
     except Exception as e:
         logger.error(f"Ошибка webhook: {e}")
         return web.Response(status=500, text="Error")
+
+# Обработка HEAD/GET запросов для проверки вебхука
+async def handle_health_check(request):
+    logger.info(f"Health check: {request.method} {request.path}")
+    return web.Response(text="Bot is alive")
 
 # Настройка бота
 async def setup_bot():
@@ -49,16 +59,27 @@ async def setup_bot():
 async def init_app():
     bot_app = await setup_bot()
 
-    # Проверка/установка вебхука
-    webhook_info = await bot_app.bot.get_webhook_info()
-    if webhook_info.url != WEBHOOK_URL:
-        logger.info(f"Устанавливаю вебхук на {WEBHOOK_URL}")
-        await bot_app.bot.set_webhook(WEBHOOK_URL)
+    # Установка вебхука
+    async with bot_app:
+        webhook_info = await bot_app.bot.get_webhook_info()
+        logger.info(f"Текущий вебхук: {webhook_info.url}")
+        
+        if webhook_info.url != WEBHOOK_URL:
+            logger.info(f"Устанавливаю вебхук: {WEBHOOK_URL}")
+            await bot_app.bot.set_webhook(
+                WEBHOOK_URL,
+                allowed_updates=["message", "callback_query"]
+            )
 
     app = web.Application()
     app['bot_app'] = bot_app
-    app.router.add_post("/", handle_webhook)
-    app.router.add_get("/health", lambda r: web.Response(text="OK"))
+    
+    # КРИТИЧЕСКИЕ ИЗМЕНЕНИЯ:
+    app.router.add_post("/", handle_webhook)  # POST - от Telegram
+    app.router.add_get("/", handle_health_check)  # GET - для проверок
+    app.router.add_head("/", handle_health_check)  # HEAD - для проверок
+    app.router.add_get("/health", handle_health_check)
+    
     return app
 
 # Запуск
