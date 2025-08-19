@@ -21,61 +21,56 @@ if not BOT_TOKEN or not WEBHOOK_URL:
     logger.critical("Не заданы TELEGRAM_TOKEN или WEBHOOK_URL")
     exit(1)
 
-# Обработчики
+# Простой обработчик
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Бот работает! Отправьте сообщение.")
+    await update.message.reply_text("✅ Бот работает!")
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    logger.info(f"Получено сообщение: {text}")
-    await update.message.reply_text(f"🔍 Вы написали: {text}")
+    await update.message.reply_text(f"Эхо: {update.message.text}")
 
-# Вебхук - обработка POST запросов от Telegram
+# Упрощенный вебхук
 async def handle_webhook(request):
     try:
-        # Логируем сырые данные для отладки
         data = await request.json()
-        logger.info(f"Received webhook data: {json.dumps(data, indent=2)}")
+        logger.info(f"Received data: {json.dumps(data)}")
         
-        # Создаем Update объект
-        update = Update.de_json(data, request.app['bot_app'].bot)
+        # Минимальная валидация
+        if 'message' not in data or 'text' not in data.get('message', {}):
+            return web.Response(text="Invalid data", status=400)
         
-        # Обрабатываем апдейт
-        await request.app['bot_app'].process_update(update)
+        # Создаем простой update
+        update = Update(de_json=data)
         
-        return web.Response(text="OK", status=200)
+        # Обрабатываем текст
+        text = data['message']['text']
+        if text.startswith('/'):
+            await start(update, None)
+        else:
+            await echo(update, None)
+            
+        return web.Response(text="OK")
         
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}", exc_info=True)
         return web.Response(text=f"Error: {str(e)}", status=500)
 
-# Универсальный обработчик для GET/HEAD запросов
 async def handle_health_check(request):
     return web.Response(text="Bot is alive")
 
-# Настройка бота
-async def setup_bot():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    return app
-
-# Инициализация aiohttp
 async def init_app():
-    bot_app = await setup_bot()
     app = web.Application()
-    app['bot_app'] = bot_app
     
-    # Маршруты
+    # Только базовые маршруты
     app.router.add_post("/", handle_webhook)
-    app.router.add_route("*", "/", handle_health_check)
     app.router.add_get("/health", handle_health_check)
+    app.router.add_get("/", handle_health_check)
     
     return app
 
-# Запуск
 if __name__ == "__main__":
-    logger.info("🚀 Запуск бота...")
-    loop = asyncio.get_event_loop()
-    app = loop.run_until_complete(init_app())
-    web.run_app(app, host="0.0.0.0", port=10000)
+    logger.info("🚀 Запуск упрощенного бота...")
+    try:
+        app = asyncio.run(init_app())
+        web.run_app(app, host="0.0.0.0", port=10000)
+    except Exception as e:
+        logger.critical(f"Fatal error: {e}")
