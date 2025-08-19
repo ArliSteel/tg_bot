@@ -43,7 +43,7 @@ async def handle_webhook(request):
         logger.error(f"Ошибка webhook: {e}")
         return web.Response(status=500, text="Error")
 
-# Обработка HEAD/GET запросов для проверки вебхука
+# Универсальный обработчик для GET/HEAD запросов
 async def handle_health_check(request):
     logger.info(f"Health check: {request.method} {request.path}")
     return web.Response(text="Bot is alive")
@@ -76,8 +76,7 @@ async def init_app():
     
     # КРИТИЧЕСКИЕ ИЗМЕНЕНИЯ:
     app.router.add_post("/", handle_webhook)  # POST - от Telegram
-    app.router.add_get("/", handle_health_check)  # GET - для проверок
-    app.router.add_head("/", handle_health_check)  # HEAD - для проверок
+    app.router.add_route("*", "/", handle_health_check)  # Все методы для корня
     app.router.add_get("/health", handle_health_check)
     
     return app
