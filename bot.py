@@ -3,6 +3,8 @@ import json
 import httpx
 import logging
 import asyncio
+import random
+import time
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
@@ -78,6 +80,15 @@ MODEL_CONFIG = {
     "max_tokens": 300
 }
 
+# Настройки симуляции человека
+HUMAN_SIMULATION = {
+    "min_typing_delay": 2,  # минимальная задержка перед ответом (сек)
+    "max_typing_delay": 8,  # максимальная задержка перед ответом (сек)
+    "chars_per_second": 10,  # скорость "печатания" (символов в секунду)
+    "typing_variation": 0.3,  # вариативность скорости печатания (30%)
+    "error_probability": 0.05,  # вероятность "ошибки" и перепечатывания (5%)
+}
+
 # Глобальная переменная для бота
 bot_app = None
 
@@ -131,14 +142,11 @@ class YandexGPTClient:
 {usp_text}
 
 **ПРАВИЛА ОБЩЕНИЯ:**
-1. 🎯 Отвечай только на вопросы про детейлинг, покраску и смежные темы
-2. 💰 Указывай цены как ориентировочные - говори "от X рублей"
-3. 📅 На запрос записи предлагай позвонить по телефону для консультации
-4. ❌ На вопросы не по теме отвечай: "Этот вопрос лучше обсудить с администратором"
-5. ⚠️ Не давай медицинских, юридических или технических советов по ремонту
-6. 🔧 При описании работ используй профессиональную терминологию: ЛКП, PDR, керамика, полимеризация
-7. 🚗 Упоминай, что работаем с премиальными брендами
-8. 🎨 Предлагай комплексные решения при проблемах с покрытием
+1. Отвечай как живой человек, а не как бот
+2. Используй неформальный, но профессиональный стиль общения
+3. Можешь использовать разговорные выражения, соответствующие стилю общения автосервиса
+4. Иногда можешь делать небольшие опечатки для естественности
+5. Отвечай так, как будто ты настоящий специалист по детейлингу
 
 **ВАЖНО:**
 - Всегда сохраняй профессиональный тон эксперта детейлинга
@@ -194,11 +202,94 @@ class YandexGPTClient:
             logger.error(f"Неожиданная ошибка в YandexGPT: {str(e)}")
             return "Извините, произошла техническая ошибка. Пожалуйста, попробуйте позже."
 
+# ==================== СИМУЛЯЦИЯ ЧЕЛОВЕЧЕСКОГО ПОВЕДЕНИЯ ====================
+
+async def simulate_typing(chat_id, context, text_length):
+    """Симуляция печатания человека с учетом длины текста"""
+    # Расчет времени печатания на основе длины текста
+    base_typing_time = text_length / HUMAN_SIMULATION['chars_per_second']
+    
+    # Добавление вариативности
+    variation = base_typing_time * HUMAN_SIMULATION['typing_variation']
+    typing_time = base_typing_time + random.uniform(-variation, variation)
+    
+    # Ограничение минимального и максимального времени
+    typing_time = max(HUMAN_SIMULATION['min_typing_delay'], 
+                     min(typing_time, HUMAN_SIMULATION['max_typing_delay']))
+    
+    # Симуляция печатания с обновлением статуса
+    start_time = time.time()
+    while time.time() - start_time < typing_time:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        await asyncio.sleep(4.5)  # Обновляем статус каждые 4.5 секунд (Telegram скрывает через 5)
+    
+    return typing_time
+
+async def simulate_human_typing_mistakes(text):
+    """Добавление случайных опечаток для естественности"""
+    if random.random() > HUMAN_SIMULATION['error_probability']:
+        return text
+    
+    # Случайные опечатки
+    mistakes = [
+        (("о", "а"), 0.3),  # замена о на а и наоборот
+        (("е", "и"), 0.2),  # замена е на и и наоборот
+        (("с", "ш"), 0.1),  # замена с на ш и наоборот
+        (("."), 0.05),      # пропуск точки
+        ((","), 0.05),      # пропуск запятой
+    ]
+    
+    words = text.split()
+    if len(words) > 3:
+        # Выбираем случайное слово для ошибки (не первое и не последнее)
+        word_idx = random.randint(1, len(words) - 2)
+        word = words[word_idx]
+        
+        for chars, prob in mistakes:
+            if random.random() < prob and any(c in word for c in chars):
+                if len(chars) == 1:
+                    # Пропуск символа
+                    if chars[0] in word:
+                        words[word_idx] = word.replace(chars[0], "", 1)
+                        break
+                else:
+                    # Замена символа
+                    from_char, to_char = chars
+                    if from_char in word:
+                        words[word_idx] = word.replace(from_char, to_char, 1)
+                        break
+                break
+    
+    return " ".join(words)
+
+async def simulate_typing_with_errors(chat_id, context, text):
+    """Полная симуляция печатания с возможными ошибками и исправлениями"""
+    # Первая попытка "печатания"
+    typing_time = await simulate_typing(chat_id, context, len(text))
+    
+    # Случайная "ошибка" и перепечатывание
+    if random.random() < HUMAN_SIMULATION['error_probability']:
+        await asyncio.sleep(0.5)
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        await asyncio.sleep(1.5)
+        
+        # "Исправление" ошибки
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        await asyncio.sleep(1.0)
+        
+        typing_time += 3.0  # Добавляем время на исправление
+    
+    return typing_time
+
 # ==================== TELEGRAM HANDLERS ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     try:
+        # Симуляция печатания
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await asyncio.sleep(random.uniform(1.5, 3.0))
+        
         welcome_msg = (
             f"🚗 *Добро пожаловать в {SALON_CONFIG['name']}!* \n\n"
             f"Я ваш персональный ассистент по вопросам детейлинга и восстановления автомобилей. "
@@ -231,6 +322,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /services"""
+    # Симуляция печатания
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await asyncio.sleep(random.uniform(2.0, 4.0))
+    
     services_text = "\n".join([f"• {service}: {price}" for service, price in SALON_CONFIG['services'].items()])
     
     services_msg = (
@@ -249,13 +344,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_text = update.message.text
         user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
         logger.info(f"Получено сообщение от {user_id}: {user_text}")
         
         # Показываем статус "печатает"
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
         
         # Получаем ответ от GPT
         reply = await YandexGPTClient.generate_response(user_text)
+        
+        # Симуляция человеческого печатания
+        typing_time = await simulate_typing_with_errors(chat_id, context, reply)
+        logger.info(f"Симуляция печатания заняла {typing_time:.2f} секунд")
+        
+        # Добавляем случайные опечатки для естественности
+        reply = await simulate_human_typing_mistakes(reply)
         
         # Фильтрация нежелательных фраз
         banned_phrases = ["лечебн", "медицинск", "гарантируем", "100%", "вылеч", "диагноз", "юридическ"]
@@ -272,6 +375,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения: {e}")
+        # Короткая задержка перед отправкой ошибки
+        await asyncio.sleep(1.5)
         error_msg = (
             "⚠️ Произошла ошибка при обработке вашего запроса.\n"
             "Пожалуйста, попробуйте задать вопрос еще раз или позвоните нам напрямую: "
