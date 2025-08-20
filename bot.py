@@ -320,7 +320,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике start: {e}")
-        await update.message.reply_text("Добро пожаловать! Чем могу помочь?")
+        await update.message.reply_text(welcome_msg, parse_mode='Markdown')("Добро пожаловать! Чем могу помочь?")
 
 @secure_handler
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -384,7 +384,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply += "\n\n📞 Для записи на диагностику звоните: " + SALON_CONFIG['contacts']
         
         # Отправляем ответ
-        await update.message.reply_text(reply)
+        await update.message.reply_text(reply, parse_mode='Markdown')
         logger.info(f"Отправлен ответ пользователю {user_id}")
         
     except Exception as e:
