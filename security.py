@@ -7,6 +7,10 @@ from datetime import datetime
 from collections import defaultdict
 from functools import wraps
 
+# Добавляем необходимые импорты для telegram бота
+from telegram import Update
+from telegram.ext import ContextTypes
+
 # Настройка логгера для модуля безопасности
 logger = logging.getLogger(__name__)
 
