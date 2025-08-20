@@ -1,3 +1,4 @@
+from security import security, secure_handler
 import os
 import json
 import httpx
@@ -283,6 +284,7 @@ async def simulate_typing_with_errors(chat_id, context, text):
 
 # ==================== TELEGRAM HANDLERS ====================
 
+@secure_handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     try:
@@ -320,6 +322,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в обработчике start: {e}")
         await update.message.reply_text("Добро пожаловать! Чем могу помочь?")
 
+@secure_handler
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /services"""
     # Симуляция печатания
@@ -339,6 +342,16 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(services_msg, parse_mode='Markdown')
     logger.info(f"Отправлен список услуг пользователю {update.effective_user.id}")
 
+@secure_handler
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик медиа-файлов"""
+    await update.message.reply_text(
+        "📎 Я обрабатываю только текстовые сообщения. "
+        "Опишите вашу проблему текстом, и я с радостью помогу!"
+    )
+    logger.info(f"Получен медиа-файл от пользователя {update.effective_user.id}")
+
+@secure_handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
@@ -393,6 +406,10 @@ async def handle_webhook(request):
         update_id = data.get('update_id', 'unknown')
         logger.info(f"Получен вебхук #{update_id}")
         
+        # Проверка безопасности на уровне вебхука
+        if not security.check_global_limit(max_requests=200, period=60):
+            return web.Response(text="Rate limit exceeded", status=429)
+        
         if bot_app is None:
             logger.error("Бот не инициализирован при обработке вебхука")
             return web.Response(text="Bot not initialized", status=500)
@@ -428,6 +445,12 @@ async def initialize_bot():
         bot_app.add_handler(CommandHandler("services", handle_services))
         bot_app.add_handler(CommandHandler("uslugi", handle_services))  # Русская версия
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        
+        # Обработчик медиа-файлов
+        bot_app.add_handler(MessageHandler(
+            filters.AUDIO | filters.DOCUMENT | filters.PHOTO | filters.VIDEO | filters.VOICE, 
+            handle_media
+        ))
         
         # Инициализация и установка вебхука
         await bot_app.initialize()
