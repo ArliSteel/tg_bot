@@ -355,7 +355,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
-        user_text = update.message.text
+        # Используем безопасный текст из контекста (после обработки secure_handler)
+        user_text = context.safe_text
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         logger.info(f"Получено сообщение от {user_id}: {user_text}")

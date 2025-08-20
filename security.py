@@ -153,8 +153,8 @@ def secure_handler(func):
             await update.message.reply_text("❌ Обнаружены недопустимые символы. Вы заблокированы.")
             return
         
-        # Заменяем текст на безопасный
-        update.message.text = safe_text
+        # Передаем безопасный текст через контекст вместо изменения сообщения
+        context.safe_text = safe_text
         
         # Вызываем оригинальный обработчик
         try:
