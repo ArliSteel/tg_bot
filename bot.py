@@ -448,7 +448,7 @@ async def initialize_bot():
         
         # Обработчик медиа-файлов
         bot_app.add_handler(MessageHandler(
-            filters.AUDIO | filters.DOCUMENT | filters.PHOTO | filters.VIDEO | filters.VOICE, 
+            filters.AUDIO | filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.VOICE, 
             handle_media
         ))
         
