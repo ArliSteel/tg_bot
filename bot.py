@@ -308,6 +308,24 @@ async def simulate_typing_with_errors(chat_id, context, text):
     
     return typing_time
 
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+def contains_banned_content(text):
+    """Проверяет, содержит ли текст запрещенный контент"""
+    text_lower = text.lower()
+    medical_phrases = ["лечебн", "медицинск", "вылеч"]
+    legal_phrases = ["юридическ", "адвокат", "суд"]
+
+    # Проверяем медицинские фразы в неподходящем контексте
+    if any(phrase in text_lower for phrase in medical_phrases) and "авто" not in text_lower:
+        return True
+        
+    # Проверяем юридические фразы
+    if any(phrase in text_lower for phrase in legal_phrases):
+        return True
+        
+    return False
+
 # ==================== TELEGRAM HANDLERS ====================
 
 @secure_handler
@@ -402,8 +420,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = await simulate_human_typing_mistakes(reply)
         
         # Фильтрация нежелательных фраз
-        banned_phrases = ["лечебн", "медицинск", "гарантируем", "100%", "вылеч", "диагноз", "юридическ"]
-        if any(phrase in reply.lower() for phrase in banned_phrases):
+        if contains_banned_content(reply):
             reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
         
         # Добавляем профессиональное завершение к ответам
