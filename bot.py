@@ -47,7 +47,7 @@ SALON_CONFIG = {
     "social_media": {
         "VK": "https://vk.com/right.style89",
         "Instagram": "@right.style89",
-        "Telegram": "@rightstyle89"
+        "Telegram": "@Rightstyle89"
     },
     "services": {
         "🚗 Удаление вмятин PDR": "от 1000₽",
