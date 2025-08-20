@@ -7,6 +7,7 @@ import logging
 import asyncio
 import random
 import time
+import re
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
@@ -347,7 +348,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в обработчике start: {e}")
         # ИСПРАВЛЕНА ОШИБКА - убраны лишние скобки
         await update.message.reply_text("Добро пожаловать! Чем могу помочь?")
-        
+
 @secure_handler
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /services"""
