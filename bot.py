@@ -1,4 +1,5 @@
-from security import security, secure_handler
+# ==================== КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ ====================
+
 import os
 import json
 import httpx
@@ -9,8 +10,7 @@ import time
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
-
-# ==================== КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ ====================
+from security import security, secure_handler
 
 # Настройка логов с более информативным форматом
 logging.basicConfig(
