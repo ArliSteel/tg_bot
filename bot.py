@@ -27,14 +27,8 @@ def escape_markdown_text(text):
     if not text:
         return ""
     
-    # Список специальных символов MarkdownV2
-    md_v2_special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    
-    # Экранируем каждый специальный символ
-    for char in md_v2_special_chars:
-        text = text.replace(char, f'\\{char}')
-    
-    return text
+    # Используем встроенную функцию экранирования от Telegram
+    return escape_markdown(text, version=2)
 
 # Загрузка и валидация переменных окружения
 def load_config():
@@ -384,14 +378,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         await asyncio.sleep(random.uniform(1.5, 3.0))
         
-        welcome_msg = (
+        # Создаем приветственное сообщение с правильным экранированием
+        welcome_msg = escape_markdown_text(
             "Привет! 👋\n\n"
-            f"Я ассистент студии детейлинга «{escape_markdown_text(SALON_CONFIG['name'])}». Чем могу помочь?\n\n"
+            f"Я ассистент студии детейлинга «{SALON_CONFIG['name']}». Чем могу помочь?\n\n"
             "Мы занимаемся восстановлением лакокрасочного покрытия, удалением вмятин по технологии PDR, "
             "керамическим покрытием, полировкой оптики и многим другим.\n\n"
             "Если у вас есть вопросы по услугам или хотите записаться на бесплатную диагностику — "
             "я с радостью помогу! 😉\n\n"
-            f"📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+            f"📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
         )
         
         # Создаем клавиатуру для главного меню
@@ -407,9 +402,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике start: {e}")
-        error_msg = "Добро пожаловать! Чем могу помочь?"
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await update.message.reply_text(escaped_error_msg, parse_mode='MarkdownV2')
+        error_msg = escape_markdown_text("Добро пожаловать! Чем могу помочь?")
+        await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
 
 @secure_handler
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -421,12 +415,12 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         services_text = "\n".join([f"• {service}: {price}" for service, price in SALON_CONFIG['services'].items()])
         
-        services_msg = (
-            "🛠️ *Наши услуги и цены:*\n\n"
+        services_msg = escape_markdown_text(
+            "🛠️ Наши услуги и цены:\n\n"
             f"{services_text}\n\n"
-            "*Примечание:* Цены указаны в рублях и являются ориентировочными. "
+            "Примечание: Цены указаны в рублях и являются ориентировочными. "
             "Точную стоимость можно определить после диагностики автомобиля.\n\n"
-            f"📞 Запись на диагностику: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+            f"📞 Запись на диагностику: {SALON_CONFIG['contacts']}"
         )
         
         # Добавляем кнопку возврата
@@ -438,9 +432,8 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике services: {e}")
-        error_msg = "Извините, произошла ошибка при загрузке услуг."
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await update.message.reply_text(escaped_error_msg, parse_mode='MarkdownV2')
+        error_msg = escape_markdown_text("Извините, произошла ошибка при загрузке услуг.")
+        await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
 
 @secure_handler
 async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -456,10 +449,14 @@ async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            "❓ *Выберите интересующий вопрос:*\n\n"
+        faq_text = escape_markdown_text(
+            "❓ Выберите интересующий вопрос:\n\n"
             "Здесь собраны самые популярные вопросы о наших услугах. "
-            "Если не найдете ответ — просто напишите свой вопрос!",
+            "Если не найдете ответ — просто напишите свой вопрос!"
+        )
+        
+        await update.message.reply_text(
+            faq_text,
             parse_mode='MarkdownV2',
             reply_markup=reply_markup
         )
@@ -467,20 +464,18 @@ async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике FAQ: {e}")
-        error_msg = "Извините, произошла ошибка при загрузке меню."
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await update.message.reply_text(escaped_error_msg, parse_mode='MarkdownV2')
+        error_msg = escape_markdown_text("Извините, произошла ошибка при загрузке меню.")
+        await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
 
 @secure_handler
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик медиа-файлов"""
     try:
-        error_msg = (
+        error_msg = escape_markdown_text(
             "📎 Я обрабатываю только текстовые сообщения. "
             "Опишите вашу проблему текстом, и я с радостью помогу!"
         )
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await update.message.reply_text(escaped_error_msg, parse_mode='MarkdownV2')
+        await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
         logger.info(f"Получен медиа-файл от пользователя {update.effective_user.id}")
     except Exception as e:
         logger.error(f"Ошибка в обработчике медиа: {e}")
@@ -505,8 +500,10 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросам", callback_data="back_to_faq")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
+                answer_text = escape_markdown_text(f"{answer}\n\nЕсть дополнительные вопросы? Звоните: {SALON_CONFIG['contacts']}")
+                
                 await query.edit_message_text(
-                    text=f"{answer}\n\n📞 *Есть дополнительные вопросы?* Звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}",
+                    text=answer_text,
                     parse_mode='MarkdownV2',
                     reply_markup=reply_markup
                 )
@@ -521,24 +518,28 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                "❓ *Выберите интересующий вопрос:*\n\n"
+            faq_text = escape_markdown_text(
+                "❓ Выберите интересующий вопрос:\n\n"
                 "Здесь собраны самые популярные вопросы о наших услугах. "
-                "Если не найдете ответ — просто напишите свой вопрос!",
+                "Если не найдете ответ — просто напишите свой вопрос!"
+            )
+            
+            await query.edit_message_text(
+                faq_text,
                 parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
             
         elif callback_data == "back_to_main":
             # Возвращаемся к главному меню (стартовому сообщению)
-            welcome_msg = (
+            welcome_msg = escape_markdown_text(
                 "Привет! 👋\n\n"
-                f"Я ассистент студии детейлинга «{escape_markdown_text(SALON_CONFIG['name'])}». Чем могу помочь?\n\n"
+                f"Я ассистент студии детейлинга «{SALON_CONFIG['name']}». Чем могу помочь?\n\n"
                 "Мы занимаемся восстановлением лакокрасочного покрытия, удалением вмятин по технологии PDR, "
                 "керамическим покрытием, полировкой оптики и многим другим.\n\n"
                 "Если у вас есть вопросы по услугам или хотите записаться на бесплатную диагностику — "
                 "я с радостью помогу! 😉\n\n"
-                f"📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+                f"📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
             )
             
             # Создаем клавиатуру для главного меню
@@ -557,9 +558,8 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             
     except Exception as e:
         logger.error(f"Ошибка обработки callback: {e}")
-        error_msg = "⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз."
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await query.edit_message_text(escaped_error_msg, parse_mode='MarkdownV2')
+        error_msg = escape_markdown_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+        await query.edit_message_text(error_msg, parse_mode='MarkdownV2')
 
 @secure_handler
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -577,10 +577,14 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                "❓ *Выберите интересующий вопрос:*\n\n"
+            faq_text = escape_markdown_text(
+                "❓ Выберите интересующий вопрос:\n\n"
                 "Здесь собраны самые популярные вопросы о наших услугах. "
-                "Если не найдете ответ — просто напишите свой вопрос!",
+                "Если не найдете ответ — просто напишите свой вопрос!"
+            )
+            
+            await query.edit_message_text(
+                faq_text,
                 parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
@@ -589,12 +593,12 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Показываем услуги
             services_text = "\n".join([f"• {service}: {price}" for service, price in SALON_CONFIG['services'].items()])
             
-            services_msg = (
-                "🛠️ *Наши услуги и цены:*\n\n"
+            services_msg = escape_markdown_text(
+                "🛠️ Наши услуги и цены:\n\n"
                 f"{services_text}\n\n"
-                "*Примечание:* Цены указаны в рублях и являются ориентировочными. "
+                "Примечание: Цены указаны в рублях и являются ориентировочными. "
                 "Точную стоимость можно определить после диагностики автомобиля.\n\n"
-                f"📞 Запись на диагностику: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+                f"📞 Запись на диагностику: {SALON_CONFIG['contacts']}"
             )
             
             # Добавляем кнопку возврата
@@ -605,16 +609,16 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         elif query.data == "show_contacts":
             # Показываем контакты
-            contacts_msg = (
-                "📞 *Наши контакты:*\n\n"
-                f"Телефон: {escape_markdown_text(SALON_CONFIG['contacts'])}\n"
-                f"Адрес: {escape_markdown_text(SALON_CONFIG['address'])}\n"
-                f"Режим работы: {escape_markdown_text(SALON_CONFIG['working_hours'])}\n\n"
-                f"🌐 *Соцсети:*\n"
-                f"VK: {escape_markdown_text(SALON_CONFIG['social_media']['VK'])}\n"
-                f"Instagram: {escape_markdown_text(SALON_CONFIG['social_media']['Instagram'])}\n"
-                f"Telegram: {escape_markdown_text(SALON_CONFIG['social_media']['Telegram'])}\n\n"
-                "🚗 *Приезжайте к нам на бесплатную диагностику!*"
+            contacts_msg = escape_markdown_text(
+                "📞 Наши контакты:\n\n"
+                f"Телефон: {SALON_CONFIG['contacts']}\n"
+                f"Адрес: {SALON_CONFIG['address']}\n"
+                f"Режим работы: {SALON_CONFIG['working_hours']}\n\n"
+                f"🌐 Соцсети:\n"
+                f"VK: {SALON_CONFIG['social_media']['VK']}\n"
+                f"Instagram: {SALON_CONFIG['social_media']['Instagram']}\n"
+                f"Telegram: {SALON_CONFIG['social_media']['Telegram']}\n\n"
+                "🚗 Приезжайте к нам на бесплатную диагностику!"
             )
             
             # Добавляем кнопку возврата
@@ -625,9 +629,8 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logger.error(f"Ошибка обработки главного меню: {e}")
-        error_msg = "⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз."
-        escaped_error_msg = escape_markdown_text(error_msg)
-        await query.edit_message_text(escaped_error_msg, parse_mode='MarkdownV2')
+        error_msg = escape_markdown_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+        await query.edit_message_text(error_msg, parse_mode='MarkdownV2')
 
 @secure_handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
