@@ -13,3 +13,5 @@ services:
         value: "<ТОКЕН_YANDEX>"
       - key: YANDEX_FOLDER_ID
         value: "<FOLDER_ID_YANDEX>"
+      - key: WEBHOOK_SECRET
+        value: "<ВАШ_СЕКРЕТНЫЙ_ТОКЕН>"

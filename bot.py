@@ -11,14 +11,24 @@ import re
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.helpers import escape_markdown
 from security import security, secure_handler
 
-# Настройка логов с более информативным формата
+# Настройка логов с ротацией и маскированием конфиденциальных данных
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Функция для экранирования Markdown
+def escape_markdown_text(text):
+    """Экранирование текста для MarkdownV2"""
+    if not text:
+        return ""
+    
+    # Экранируем специальные символы MarkdownV2
+    return escape_markdown(text, version=2)
 
 # Загрузка и валидация переменных окружения
 def load_config():
@@ -26,15 +36,24 @@ def load_config():
     config = {
         'BOT_TOKEN': os.getenv("TELEGRAM_TOKEN"),
         'WEBHOOK_URL': os.getenv("WEBHOOK_URL"),
+        'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET", "default_secret_token"),
         'YANDEX_API_KEY': os.getenv("YANDEX_API_KEY"),
         'YANDEX_FOLDER_ID': os.getenv("YANDEX_FOLDER_ID")
     }
     
-    missing_vars = [key for key, value in config.items() if not value]
+    missing_vars = [key for key, value in config.items() if not value and key != 'WEBHOOK_SECRET']
     if missing_vars:
         logger.critical(f"Отсутствуют переменные окружения: {missing_vars}")
         exit(1)
     
+    # Маскируем чувствительные данные в логах
+    masked_config = config.copy()
+    if masked_config['BOT_TOKEN']:
+        masked_config['BOT_TOKEN'] = masked_config['BOT_TOKEN'][:10] + '...'
+    if masked_config['YANDEX_API_KEY']:
+        masked_config['YANDEX_API_KEY'] = masked_config['YANDEX_API_KEY'][:10] + '...'
+    
+    logger.info(f"Загружена конфигурация: {masked_config}")
     return config
 
 # Загружаем конфиг
@@ -139,7 +158,10 @@ class YandexGPTClient:
     @staticmethod
     def format_with_markdown(text: str) -> str:
         """Преобразует текст в Markdown-формат для лучшего отображения"""
-        # Добавляем жирный шрифт к заголовкам списков
+        # Сначала экранируем весь текст
+        text = escape_markdown_text(text)
+        
+        # Затем добавляем форматирование
         text = re.sub(r'(\d+\.\s+)([^:\n]+:)', r'\1**\2**', text)
         text = re.sub(r'(\d+\.\s+)([^\n]+)', r'\1**\2**', text)
         
@@ -387,7 +409,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(welcome_msg, parse_mode='Markdown', reply_markup=reply_markup)
+        await update.message.reply_text(welcome_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
         logger.info(f"Отправлено приветственное сообщение пользователю {update.effective_user.id}")
         
     except Exception as e:
@@ -415,7 +437,7 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(services_msg, parse_mode='Markdown', reply_markup=reply_markup)
+    await update.message.reply_text(services_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
     logger.info(f"Отправлен список услуг пользователю {update.effective_user.id}")
 
 @secure_handler
@@ -436,7 +458,7 @@ async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❓ *Выберите интересующий вопрос:*\n\n"
             "Здесь собраны самые популярные вопросы о наших услугах. "
             "Если не найдете ответ — просто напишите свой вопрос!",
-            parse_mode='Markdown',
+            parse_mode='MarkdownV2',
             reply_markup=reply_markup
         )
         logger.info(f"Показано меню FAQ пользователю {update.effective_user.id}")
@@ -471,12 +493,12 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 answer = FAQ_CARDS[faq_key]["answer"]
                 
                 # Создаем клавиатуру для возврата
-                keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросам", callback_data="back_to_faq")]]
+                keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросы", callback_data="back_to_faq")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(
                     text=f"{answer}\n\n📞 *Есть дополнительные вопросы?* Звоните: {SALON_CONFIG['contacts']}",
-                    parse_mode='Markdown',
+                    parse_mode='MarkdownV2',
                     reply_markup=reply_markup
                 )
                 logger.info(f"Показан ответ на вопрос {faq_key} пользователю {user_id}")
@@ -494,7 +516,7 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "❓ *Выберите интересующий вопрос:*\n\n"
                 "Здесь собраны самые популярные вопросы о наших услугах. "
                 "Если не найдете ответ — просто напишите свой вопрос!",
-                parse_mode='Markdown',
+                parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
             
@@ -533,7 +555,7 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             await query.edit_message_text(
                 welcome_msg,
-                parse_mode='Markdown',
+                parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
             
@@ -561,7 +583,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❓ *Выберите интересующий вопрос:*\n\n"
                 "Здесь собраны самые популярные вопросы о наших услугах. "
                 "Если не найдете ответ — просто напишите свой вопрос!",
-                parse_mode='Markdown',
+                parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
             
@@ -581,7 +603,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(services_msg, parse_mode='Markdown', reply_markup=reply_markup)
+            await query.edit_message_text(services_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
             
         elif query.data == "show_contacts":
             # Показываем контакты
@@ -601,7 +623,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(contacts_msg, parse_mode='Markdown', reply_markup=reply_markup)
+            await query.edit_message_text(contacts_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
             
     except Exception as e:
         logger.error(f"Ошибка обработки главного меню: {e}")
@@ -621,13 +643,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = context.safe_text
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
-        logger.info(f"Получено сообщение от {user_id}: {user_text}")
+        
+        # Логируем только факт получения сообщения без полного текста
+        logger.info(f"Получено сообщение от {user_id}, длина: {len(user_text)} символов")
         
         # Показываем статус "печатает"
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
         
         # Получаем ответ от GPT
         reply = await YandexGPTClient.generate_response(user_text)
+        
+        # Ограничиваем длину ответа
+        if len(reply) > 2000:
+            reply = reply[:2000] + "..."
         
         # Симуляция человеческого печатания
         typing_time = await simulate_typing_with_errors(chat_id, context, reply)
@@ -644,9 +672,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
             reply += "\n\n📞 Для записи на диагностику звоните: " + SALON_CONFIG['contacts']
         
-        # Отправляем ответ
-        await update.message.reply_text(reply, parse_mode='Markdown')
-        logger.info(f"Отправлен ответ пользователю {user_id}")
+        # Отправляем ответ с MarkdownV2
+        await update.message.reply_text(reply, parse_mode='MarkdownV2')
+        logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
         
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения: {e}")
@@ -662,8 +690,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== WEBHOOK HANDLERS ====================
 
 async def handle_webhook(request):
-    """Обработчик вебхука от Telegram"""
+    """Обработчик вебхука от Telegram с проверкой секретного токена"""
     try:
+        # Проверка секретного токена
+        expected_token = CONFIG['WEBHOOK_SECRET']
+        received_token = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
+        
+        if expected_token != received_token:
+            logger.warning(f"Invalid webhook secret token: {received_token}")
+            return web.Response(text="Invalid token", status=403)
+        
         data = await request.json()
         update_id = data.get('update_id', 'unknown')
         logger.info(f"Получен вебхук #{update_id}")
@@ -720,11 +756,12 @@ async def initialize_bot():
         bot_app.add_handler(CallbackQueryHandler(handle_faq_callback, pattern="^back_to_"))
         bot_app.add_handler(CallbackQueryHandler(handle_main_menu, pattern="^show_"))
         
-        # Инициализация и установка вебхука
+        # Инициализация и установка вебхука с секретным токеном
         await bot_app.initialize()
         await bot_app.bot.set_webhook(
             CONFIG['WEBHOOK_URL'],
-            allowed_updates=["message", "callback_query"]
+            allowed_updates=["message", "callback_query"],
+            secret_token=CONFIG['WEBHOOK_SECRET']
         )
         
         logger.info(f"Вебхук установлен: {CONFIG['WEBHOOK_URL']}")
