@@ -9,11 +9,11 @@ import random
 import time
 import re
 from aiohttp import web
-from telegram import Update
-from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from security import security, secure_handler
 
-# Настройка логов с более информативным форматом
+# Настройка логов с более информативным формата
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
@@ -56,7 +56,7 @@ SALON_CONFIG = {
         "🔧 Ремонт царапин до металла": "от 2500₽",
         "🎯 Локальный ремонт сколов": "от 1000₽",
         "✨ Восстановление кантов и порогов": "от 2800₽",
-        "⚫️ Антихром (чернение хрома)": "от 500₽",
+        "⚫️ Антихром (чернение хрома):": "от 500₽",
         "🎨 Окрас шильдиков и эмблем": "от 800₽",
         "💫 Индивидуальный дизайн": "по договорённости",
         "🔆 Локальная покраска деталей": "от 5000₽",
@@ -73,6 +73,26 @@ SALON_CONFIG = {
         "Технология Paintless Dent Repair (PDR)",
         "Экологичные материалы без токсичных веществ"
     ]
+}
+
+# FAQ карточки
+FAQ_CARDS = {
+    "pdr_technology": {
+        "question": "🤔 Что такое технология PDR?",
+        "answer": "🔧 *PDR (Paintless Dent Repair)* — это современная технология удаления вмятин без покраски.\n\n*Преимущества:*\n• Сохранение заводского ЛКП\n• Быстрое выполнение (от 30 минут)\n• Гарантия 12 месяцев\n• Экономия до 70% compared с традиционным ремонтом"
+    },
+    "ceramic_coating": {
+        "question": "💎 Что дает керамическое покрытие?",
+        "answer": "✨ *Керамическое покрытие* — это нано-защита для вашего авто:\n\n*Преимущества:*\n• Защита от УФ-лучей и выцветания\n• Стойкость к химическим воздействиям\n• Гидрофобный эффект (вода скатывается)\n• Легкость в мойке\n• Блеск как у нового авто\n• Гарантия до 5 лет"
+    },
+    "polishing_types": {
+        "question": "🔆 Какие виды полировки бывают?",
+        "answer": "📋 *Мы предлагаем 3 вида полировки:*\n\n1. *Восстановительная* — удаление царапин и дефектов\n2. *Защитная* — нанесение восков/синтетики\n3. *Керамическая* — долговременная защита\n\n💡 *Бесплатная диагностика* определит нужный тип для вашего авто!"
+    },
+    "paint_repair": {
+        "question": "🎨 Как ремонтируют сколы и царапины?",
+        "answer": "🛠️ *Процесс ремонта ЛКП:*\n\n1. Очистка и обезжиривание\n2. Подбор цвета по VIN-коду\n3. Локальное нанесение краски\n4. Сушение ИК-лампой\n5. Полировка до идеального глянца\n\n⚡ *Результат:* неотличимо от заводского покрытия!"
+    }
 }
 
 # Константы API
@@ -359,12 +379,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Задайте ваш вопрос, и я с радостью помогу! 🛠️"
         )
         
-        await update.message.reply_text(welcome_msg, parse_mode='Markdown')
+        # Создаем клавиатуру для главного меню
+        keyboard = [
+            [InlineKeyboardButton("❓ Частые вопросы", callback_data="show_faq")],
+            [InlineKeyboardButton("🛠️ Наши услуги", callback_data="show_services")],
+            [InlineKeyboardButton("📞 Связаться с нами", callback_data="show_contacts")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(welcome_msg, parse_mode='Markdown', reply_markup=reply_markup)
         logger.info(f"Отправлено приветственное сообщение пользователю {update.effective_user.id}")
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике start: {e}")
-        # ИСПРАВЛЕНА ОШИБКА - убраны лишние скобки
         await update.message.reply_text("Добро пожаловать! Чем могу помочь?")
 
 @secure_handler
@@ -384,8 +411,39 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📞 Запись на диагностику: " + SALON_CONFIG['contacts']
     )
     
-    await update.message.reply_text(services_msg, parse_mode='Markdown')
+    # Добавляем кнопку возврата
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(services_msg, parse_mode='Markdown', reply_markup=reply_markup)
     logger.info(f"Отправлен список услуг пользователю {update.effective_user.id}")
+
+@secure_handler
+async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /faq - показывает меню с FAQ"""
+    try:
+        # Создаем клавиатуру с кнопками FAQ
+        keyboard = []
+        for key, data in FAQ_CARDS.items():
+            keyboard.append([InlineKeyboardButton(data["question"], callback_data=f"faq_{key}")])
+        
+        # Добавляем кнопку "Назад" в главное меню
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "❓ *Выберите интересующий вопрос:*\n\n"
+            "Здесь собраны самые популярные вопросы о наших услугах. "
+            "Если не найдете ответ — просто напишите свой вопрос!",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        logger.info(f"Показано меню FAQ пользователю {update.effective_user.id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике FAQ: {e}")
+        await update.message.reply_text("Извините, произошла ошибка при загрузке меню.")
 
 @secure_handler
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -397,9 +455,168 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Получен медиа-файл от пользователя {update.effective_user.id}")
 
 @secure_handler
+async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатий на кнопки FAQ"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    callback_data = query.data
+    
+    try:
+        if callback_data.startswith("faq_"):
+            # Показываем ответ на вопрос
+            faq_key = callback_data[4:]  # Убираем префикс "faq_"
+            if faq_key in FAQ_CARDS:
+                answer = FAQ_CARDS[faq_key]["answer"]
+                
+                # Создаем клавиатуру для возврата
+                keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросам", callback_data="back_to_faq")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    text=f"{answer}\n\n📞 *Есть дополнительные вопросы?* Звоните: {SALON_CONFIG['contacts']}",
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
+                )
+                logger.info(f"Показан ответ на вопрос {faq_key} пользователю {user_id}")
+        
+        elif callback_data == "back_to_faq":
+            # Возвращаемся к меню FAQ
+            keyboard = []
+            for key, data in FAQ_CARDS.items():
+                keyboard.append([InlineKeyboardButton(data["question"], callback_data=f"faq_{key}")])
+            
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "❓ *Выберите интересующий вопрос:*\n\n"
+                "Здесь собраны самые популярные вопросы о наших услугах. "
+                "Если не найдете ответ — просто напишите свой вопрос!",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        elif callback_data == "back_to_main":
+            # Возвращаемся к главному меню (стартовому сообщению)
+            welcome_msg = (
+                f"🚗 *Добро пожаловать в {SALON_CONFIG['name']}!* \n\n"
+                f"Я ваш персональный ассистент по вопросам детейлинга и восстановления автомобилей. "
+                f"Готов ответить на ваши вопросы о наших услугах:\n\n"
+                
+                f"✨ *Основные направления:*\n"
+                f"• Восстановление ЛКП и удаление вмятин\n"
+                f"• Керамическое покрытие и защита кузова\n"
+                f"• Полировка фар и восстановление оптики\n"
+                f"• Антихром и чернение хромированных деталей\n"
+                f"• Химчистка салонов премиум-класса\n\n"
+                
+                f"📞 *Контакты для записи:*\n"
+                f"Телефон: {SALON_CONFIG['contacts']}\n"
+                f"Адрес: {SALON_CONFIG['address']}\n"
+                f"Режим работы: {SALON_CONFIG['working_hours']}\n\n"
+                
+                f"🔧 *Персональное предложение:*\n"
+                f"При записи через Telegram - *бесплатная диагностика* состояния лакокрасочного покрытия!\n\n"
+                
+                f"Задайте ваш вопрос, и я с радостью помогу! 🛠️"
+            )
+            
+            # Создаем клавиатуру для главного меню
+            keyboard = [
+                [InlineKeyboardButton("❓ Частые вопросы", callback_data="show_faq")],
+                [InlineKeyboardButton("🛠️ Наши услуги", callback_data="show_services")],
+                [InlineKeyboardButton("📞 Связаться с нами", callback_data="show_contacts")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                welcome_msg,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+    except Exception as e:
+        logger.error(f"Ошибка обработки callback: {e}")
+        await query.edit_message_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+
+@secure_handler
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопок главного меню"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        if query.data == "show_faq":
+            # Показываем меню FAQ
+            keyboard = []
+            for key, data in FAQ_CARDS.items():
+                keyboard.append([InlineKeyboardButton(data["question"], callback_data=f"faq_{key}")])
+            
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "❓ *Выберите интересующий вопрос:*\n\n"
+                "Здесь собраны самые популярные вопросы о наших услугах. "
+                "Если не найдете ответ — просто напишите свой вопрос!",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        elif query.data == "show_services":
+            # Показываем услуги
+            services_text = "\n".join([f"• {service}: {price}" for service, price in SALON_CONFIG['services'].items()])
+            
+            services_msg = (
+                "🛠️ *Наши услуги и цены:*\n\n"
+                f"{services_text}\n\n"
+                "*Примечание:* Цены указаны в рублях и являются ориентировочными. "
+                "Точную стоимость можно определить после диагностики автомобиля.\n\n"
+                "📞 Запись на диагностику: " + SALON_CONFIG['contacts']
+            )
+            
+            # Добавляем кнопку возврата
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(services_msg, parse_mode='Markdown', reply_markup=reply_markup)
+            
+        elif query.data == "show_contacts":
+            # Показываем контакты
+            contacts_msg = (
+                "📞 *Наши контакты:*\n\n"
+                f"Телефон: {SALON_CONFIG['contacts']}\n"
+                f"Адрес: {SALON_CONFIG['address']}\n"
+                f"Режим работы: {SALON_CONFIG['working_hours']}\n\n"
+                f"🌐 *Соцсети:*\n"
+                f"VK: {SALON_CONFIG['social_media']['VK']}\n"
+                f"Instagram: {SALON_CONFIG['social_media']['Instagram']}\n"
+                f"Telegram: {SALON_CONFIG['social_media']['Telegram']}\n\n"
+                "🚗 *Приезжайте к нам на бесплатную диагностику!*"
+            )
+            
+            # Добавляем кнопку возврата
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(contacts_msg, parse_mode='Markdown', reply_markup=reply_markup)
+            
+    except Exception as e:
+        logger.error(f"Ошибка обработки главного меню: {e}")
+        await query.edit_message_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+
+@secure_handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
+        # Проверяем, не является ли сообщение командой меню
+        user_text = update.message.text.lower()
+        if user_text in ['меню', 'start', 'начать', 'faq', 'вопросы']:
+            await start(update, context)
+            return
+            
         # Используем безопасный текст из контекста (после обработки secure_handler)
         user_text = context.safe_text
         user_id = update.effective_user.id
@@ -489,6 +706,7 @@ async def initialize_bot():
         bot_app.add_handler(CommandHandler("start", start))
         bot_app.add_handler(CommandHandler("services", handle_services))
         bot_app.add_handler(CommandHandler("uslugi", handle_services))  # Русская версия
+        bot_app.add_handler(CommandHandler("faq", handle_faq))  # Добавляем команду /faq
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
         # Обработчик медиа-файлов
@@ -496,6 +714,11 @@ async def initialize_bot():
             filters.AUDIO | filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.VOICE, 
             handle_media
         ))
+        
+        # Обработчики callback-запросов
+        bot_app.add_handler(CallbackQueryHandler(handle_faq_callback, pattern="^faq_"))
+        bot_app.add_handler(CallbackQueryHandler(handle_faq_callback, pattern="^back_to_"))
+        bot_app.add_handler(CallbackQueryHandler(handle_main_menu, pattern="^show_"))
         
         # Инициализация и установка вебхука
         await bot_app.initialize()
