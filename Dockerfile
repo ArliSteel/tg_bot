@@ -1,30 +1,28 @@
-FROM python:3.11-alpine3.18
+FROM python:3.11-slim-bullseye
 
-# Устанавливаем только необходимые системные зависимости
-RUN apk update && \
-    apk add --no-cache \
-    ffmpeg \
-    libsndfile \
-    # Временные зависимости для сборки
-    build-base \
-    libffi-dev \
-    alsa-lib-dev \
-    && rm -rf /var/cache/apk/*
+# Устанавливаем системные зависимости
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создаем непривилегированного пользователя и группу заранее
+RUN groupadd -r botuser && useradd -r -g botuser -d /app -s /sbin/nologin botuser
 
 WORKDIR /app
 
 # Копируем и устанавливаем зависимости сначала для лучшего кэширования
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    # Удаляем временные зависимости сборки
-    apk del build-base libffi-dev alsa-lib-dev
+    pip install --no-cache-dir -r requirements.txt
 
 # Копируем исходный код
 COPY . .
 
-# Создаем непривилегированного пользователя
-RUN adduser -D -u 1000 botuser
+# Меняем владельца файлов
+RUN chown -R botuser:botuser /app
+
+# Переключаемся на непривилегированного пользователя
 USER botuser
 
 EXPOSE 10000
@@ -32,6 +30,17 @@ EXPOSE 10000
 # Оптимизация для Python в контейнере
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    # Безопасность: отключаем вывод трассировки Python при ошибках
+    PYTHONTRACEMALLOC=0 \
+    # Устанавливаем стандартную локаль
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
+# Здоровье контейнера
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:10000/health || exit 1
+
+# Используем exec форму для корректной обработки сигналов
 CMD ["python", "-u", "bot.py"]

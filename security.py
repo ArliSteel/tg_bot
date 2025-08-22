@@ -17,14 +17,16 @@ from telegram.ext import ContextTypes
 # Настройка логгера для модуля безопасности
 logger = logging.getLogger(__name__)
 
-# Конфигурация безопасности
+# Конфигурация безопасности с возможностью переопределения через переменные окружения
 SECURITY_CONFIG = {
-    'MAX_TEXT_LENGTH': 800,
-    'USER_RATE_LIMIT': 5,
-    'USER_RATE_PERIOD': 60,
-    'GLOBAL_RATE_LIMIT': 100,
-    'GLOBAL_RATE_PERIOD': 60,
-    'DEFAULT_BLOCK_DURATION': 3600,
+    'MAX_TEXT_LENGTH': int(os.getenv("MAX_TEXT_LENGTH", "800")),
+    'USER_RATE_LIMIT': int(os.getenv("USER_RATE_LIMIT", "5")),
+    'USER_RATE_PERIOD': int(os.getenv("USER_RATE_PERIOD", "60")),
+    'GLOBAL_RATE_LIMIT': int(os.getenv("GLOBAL_RATE_LIMIT", "100")),
+    'GLOBAL_RATE_PERIOD': int(os.getenv("GLOBAL_RATE_PERIOD", "60")),
+    'DEFAULT_BLOCK_DURATION': int(os.getenv("BLOCK_DURATION", "3600")),
+    'WARNING_THRESHOLD': int(os.getenv("WARNING_THRESHOLD", "3")),
+    'WARNING_DURATION': int(os.getenv("WARNING_DURATION", "3600")),
     'LOG_MAX_BYTES': 10 * 1024 * 1024,  # 10MB
     'LOG_BACKUP_COUNT': 5
 }
@@ -34,14 +36,22 @@ class SecuritySystem:
         self.user_activity = defaultdict(list)
         self.global_activity = []
         self.blocked_users = {}
-        self.suspicious_patterns = [
+        self.user_warnings = defaultdict(list)  # user_id: list of (timestamp, reason)
+        
+        # Критические паттерны - немедленная блокировка
+        self.critical_patterns = [
             r"<script.*?>", r"javascript:", r"onload=", r"onerror=",
             r"DROP TABLE", r"UNION SELECT", r"INSERT INTO", r"DELETE FROM",
             r"\.\./", r"\.\.\\", r"eval\(", r"exec\(", r"alert\(",
             r"window\.location", r"document\.cookie", r"localStorage",
             r"process\.env", r"require\(", r"fs\.", r"child_process",
+            r"bash.*-i", r"curl.*bash", r"wget.*bash"  # Паттерны для reverse shell
+        ]
+        
+        # Не критические паттерны - предупреждения
+        self.non_critical_patterns = [
             r"\.env", r"config\.", r"password", r"token", r"secret",
-            r"bash.*-i", r"curl.*bash", r"wget.*bash"  # Добавлены паттерны для reverse shell
+            r"api[_-]?key", r"auth", r"login", r"credential"
         ]
         
         # Настройка ротации логов
@@ -50,8 +60,11 @@ class SecuritySystem:
     def setup_logging(self):
         """Настройка ротации логов безопасности"""
         try:
+            # Создаем директорию для логов, если её нет
+            os.makedirs("logs", exist_ok=True)
+            
             log_handler = logging.handlers.RotatingFileHandler(
-                "security.log",
+                "logs/security.log",
                 maxBytes=SECURITY_CONFIG['LOG_MAX_BYTES'],
                 backupCount=SECURITY_CONFIG['LOG_BACKUP_COUNT'],
                 encoding='utf-8'
@@ -66,14 +79,21 @@ class SecuritySystem:
             logger.error(f"Failed to setup security log rotation: {e}")
     
     def detect_suspicious(self, text):
-        """Обнаружение подозрительных паттернов в сыром тексте"""
+        """Обнаружение подозрительных паттернов с разделением на критические и не критические"""
         if not text or not isinstance(text, str):
-            return False
+            return None
             
-        for pattern in self.suspicious_patterns:
+        # Сначала проверяем критические паттерны
+        for pattern in self.critical_patterns:
             if re.search(pattern, text, re.IGNORECASE):
-                return True
-        return False
+                return 'critical'
+        
+        # Затем не критические паттерны
+        for pattern in self.non_critical_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return 'non_critical'
+                
+        return None
     
     def check_rate_limit(self, user_id, max_requests=None, period=None):
         """Проверка ограничения частоты запросов"""
@@ -115,14 +135,52 @@ class SecuritySystem:
         self.global_activity.append(current_time)
         return True
     
+    def add_warning(self, user_id, reason):
+        """Добавляет предупреждение пользователю и возвращает True, если превышен лимит"""
+        current_time = time.time()
+        
+        # Очищаем старые предупреждения
+        self.user_warnings[user_id] = [
+            (t, r) for t, r in self.user_warnings[user_id] 
+            if current_time - t < SECURITY_CONFIG['WARNING_DURATION']
+        ]
+        
+        # Добавляем новое предупреждение
+        self.user_warnings[user_id].append((current_time, reason))
+        
+        # Логируем добавление предупреждения
+        self.log_security_event(user_id, "WARNING_ADDED", 
+                              f"Reason: {reason}, Count: {len(self.user_warnings[user_id])}")
+        
+        # Проверяем, превышен ли лимит предупреждений
+        if len(self.user_warnings[user_id]) >= SECURITY_CONFIG['WARNING_THRESHOLD']:
+            self.log_security_event(user_id, "WARNING_LIMIT_EXCEEDED",
+                                  f"Warning count: {len(self.user_warnings[user_id])}")
+            return True
+            
+        return False
+    
+    def get_warning_count(self, user_id):
+        """Возвращает количество активных предупреждений пользователя"""
+        current_time = time.time()
+        
+        # Очищаем старые предупреждения
+        self.user_warnings[user_id] = [
+            (t, r) for t, r in self.user_warnings[user_id] 
+            if current_time - t < SECURITY_CONFIG['WARNING_DURATION']
+        ]
+        
+        return len(self.user_warnings[user_id])
+    
     def sanitize_input(self, text):
         """Очистка входных данных"""
         if not text or not isinstance(text, str):
             return ""
             
         # Сначала проверка на опасные паттерны в сыром тексте
-        if self.detect_suspicious(text):
-            self.log_security_event("INPUT_VALIDATION", "SUSPICIOUS_PATTERN",
+        suspicious_type = self.detect_suspicious(text)
+        if suspicious_type:
+            self.log_security_event("INPUT_VALIDATION", f"SUSPICIOUS_PATTERN_{suspicious_type.upper()}",
                                   f"Text: {text[:100]}...")
             return None
             
@@ -183,7 +241,7 @@ class SecuritySystem:
         # Запись в файл с ротацией
         try:
             security_logger = logging.getLogger('security')
-            if "RATE_LIMIT" in event_type or "BLOCKED" in event_type:
+            if "RATE_LIMIT" in event_type or "BLOCKED" in event_type or "WARNING_LIMIT" in event_type:
                 security_logger.warning(log_message)
             else:
                 security_logger.info(log_message)
@@ -191,7 +249,7 @@ class SecuritySystem:
             logger.error(f"Failed to write to security log: {e}")
         
         # Также логируем через стандартный логгер
-        if "RATE_LIMIT" in event_type or "BLOCKED" in event_type:
+        if "RATE_LIMIT" in event_type or "BLOCKED" in event_type or "WARNING_LIMIT" in event_type:
             logger.warning(log_message)
         else:
             logger.info(log_message)
@@ -222,21 +280,62 @@ def secure_handler(func):
         
         # Проверка лимита для пользователя
         if not security.check_rate_limit(user_id):
-            await update.message.reply_text("⚠️ Слишком много запросов. Подождите минуту.")
+            # Добавляем предупреждение за превышение лимита
+            warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
+            
+            if warning_exceeded:
+                await security.block_user(user_id)
+                await update.message.reply_text("⛔ Вы заблокированы за многократное превышение лимита запросов.")
+            else:
+                warning_count = security.get_warning_count(user_id)
+                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
+                await update.message.reply_text(
+                    f"⚠️ Слишком много запросов. Предупреждение {warning_count}/{max_warnings}. "
+                    f"После {max_warnings} предупреждений вы будете заблокированы."
+                )
             return
         
         # Проверка на опасные паттерны в сыром тексте
         raw_text = update.message.text
-        if security.detect_suspicious(raw_text):
+        suspicious_type = security.detect_suspicious(raw_text)
+        
+        if suspicious_type == 'critical':
+            # Критическое нарушение - немедленная блокировка
             await security.block_user(user_id)
             await update.message.reply_text("❌ Обнаружены недопустимые символы. Вы заблокированы на 1 час.")
+            return
+        elif suspicious_type == 'non_critical':
+            # Не критическое нарушение - добавляем предупреждение
+            warning_exceeded = security.add_warning(user_id, "SUSPICIOUS_CONTENT")
+            
+            if warning_exceeded:
+                await security.block_user(user_id)
+                await update.message.reply_text("❌ Вы заблокированы за многократные нарушения.")
+            else:
+                warning_count = security.get_warning_count(user_id)
+                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
+                await update.message.reply_text(
+                    f"⚠️ Обнаружены подозрительные символы. Предупреждение {warning_count}/{max_warnings}. "
+                    f"После {max_warnings} предупреждений вы будете заблокированы."
+                )
             return
         
         # Очистка входных данных
         safe_text = security.sanitize_input(raw_text)
         if safe_text is None:
-            await security.block_user(user_id)
-            await update.message.reply_text("❌ Обнаружены недопустимые символы. Вы заблокированы на 1 час.")
+            # Добавляем предупреждение за недопустимые символы
+            warning_exceeded = security.add_warning(user_id, "INVALID_CONTENT")
+            
+            if warning_exceeded:
+                await security.block_user(user_id)
+                await update.message.reply_text("❌ Вы заблокированы за многократные нарушения.")
+            else:
+                warning_count = security.get_warning_count(user_id)
+                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
+                await update.message.reply_text(
+                    f"⚠️ Обнаружены недопустимые символы. Предупреждение {warning_count}/{max_warnings}. "
+                    f"После {max_warnings} предупреждений вы будете заблокированы."
+                )
             return
         
         # Передаем безопасный текст через контекст

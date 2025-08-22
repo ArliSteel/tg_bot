@@ -30,6 +30,11 @@ def escape_markdown_text(text):
     # Используем встроенную функцию экранирования от Telegram
     return escape_markdown(text, version=2)
 
+# Функция для аудита действий пользователя
+def log_user_action(user_id: int, action: str, details: str = ""):
+    """Логирование действий пользователя для аудита"""
+    logger.info(f"AUDIT - User {user_id} - {action} - {details}")
+
 # Загрузка и валидация переменных окружения
 def load_config():
     """Загрузка и проверка конфигурации"""
@@ -38,12 +43,17 @@ def load_config():
         'WEBHOOK_URL': os.getenv("WEBHOOK_URL"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET", "default_secret_token"),
         'YANDEX_API_KEY': os.getenv("YANDEX_API_KEY"),
-        'YANDEX_FOLDER_ID': os.getenv("YANDEX_FOLDER_ID")
+        'YANDEX_FOLDER_ID': os.getenv("YANDEX_FOLDER_ID"),
+        # Параметры безопасности из переменных окружения
+        'MAX_REQUESTS_PER_MINUTE': int(os.getenv("MAX_REQUESTS_PER_MINUTE", "200")),
+        'MAX_TEXT_LENGTH': int(os.getenv("MAX_TEXT_LENGTH", "4000")),
+        'BLOCK_DURATION': int(os.getenv("BLOCK_DURATION", "3600")),
+        'WARNING_THRESHOLD': int(os.getenv("WARNING_THRESHOLD", "5")),
     }
     
-    missing_vars = [key for key, value in config.items() if not value and key != 'WEBHOOK_SECRET']
+    missing_vars = [key for key, value in config.items() if not value and key not in ['WEBHOOK_SECRET', 'MAX_REQUESTS_PER_MINUTE', 'MAX_TEXT_LENGTH', 'BLOCK_DURATION', 'WARNING_THRESHOLD']]
     if missing_vars:
-        logger.critical(f"Отсутствуют переменные окружения: {missing_vars}")
+        logger.critical(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
         exit(1)
     
     # Маскируем чувствительные данные в логах
@@ -52,6 +62,8 @@ def load_config():
         masked_config['BOT_TOKEN'] = masked_config['BOT_TOKEN'][:10] + '...'
     if masked_config['YANDEX_API_KEY']:
         masked_config['YANDEX_API_KEY'] = masked_config['YANDEX_API_KEY'][:10] + '...'
+    if masked_config['WEBHOOK_SECRET']:
+        masked_config['WEBHOOK_SECRET'] = masked_config['WEBHOOK_SECRET'][:10] + '...'
     
     logger.info(f"Загружена конфигурация: {masked_config}")
     return config
@@ -133,6 +145,58 @@ HUMAN_SIMULATION = {
 # Глобальная переменная для бота
 bot_app = None
 
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+def contains_banned_content(text):
+    """Проверяет, содержит ли текст запрещенный контент"""
+    text_lower = text.lower()
+    medical_phrases = ["лечебн", "медицинск", "вылеч"]
+    legal_phrases = ["юридическ", "адвокат", "суд"]
+
+    # Проверяем медицинские фразы в неподходящем контексте
+    if any(phrase in text_lower for phrase in medical_phrases) and "авто" not in text_lower:
+        return True
+        
+    # Проверяем юридические фразы
+    if any(phrase in text_lower for phrase in legal_phrases):
+        return True
+        
+    return False
+
+def check_response_safety(text):
+    """Проверяет ответ LLM на утечку конфиденциальной информации"""
+    if not text:
+        return True
+        
+    # Проверяем на утечку потенциальных секретов
+    secret_patterns = [
+        r'[A-Za-z0-9]{32,}',  # Длинные строки, похожие на хэши/токены
+        r'password.*:.+',      # Упоминание паролей
+        r'token.*:.+',         # Упоминание токенов
+        r'api[_-]?key.*:.+',   # Упоминание API-ключей
+        r'secret.*:.+',        # Упоминание секретов
+    ]
+    
+    for pattern in secret_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            logger.warning(f"Обнаружена потенциальная утечка в ответе LLM: {pattern}")
+            return False
+            
+    # Проверяем на наличие конфиденциальных данных из конфига
+    sensitive_data = [
+        CONFIG['BOT_TOKEN'],
+        CONFIG['YANDEX_API_KEY'],
+        CONFIG['WEBHOOK_SECRET'],
+        SALON_CONFIG['contacts'],
+    ]
+    
+    for data in sensitive_data:
+        if data and data in text:
+            logger.warning("Обнаружена утечка конфиденциальных данных в ответе LLM")
+            return False
+            
+    return True
+
 # ==================== YANDEX GPT КЛИЕНТ ====================
 
 class YandexGPTClient:
@@ -208,7 +272,7 @@ class YandexGPTClient:
 5. Отвечай так, как будто ты настоящий специалист по детейлингу
 6. Всегда используй Markdown-разметку для форматирования ответов:
    - Заголовки выделяй **жирным текстом**
-   - Важные моменты выделяй *курсивом*
+   - Важные моменты выделяй *курсивом**
    - Используй эмодзи для визуального оформления 🚗✨🔧
    - Списки оформляй с помощью цифр или пунктов
 
@@ -350,30 +414,15 @@ async def simulate_typing_with_errors(chat_id, context, text):
     
     return typing_time
 
-# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
-
-def contains_banned_content(text):
-    """Проверяет, содержит ли текст запрещенный контент"""
-    text_lower = text.lower()
-    medical_phrases = ["лечебн", "медицинск", "вылеч"]
-    legal_phrases = ["юридическ", "адвокат", "суд"]
-
-    # Проверяем медицинские фразы в неподходящем контексте
-    if any(phrase in text_lower for phrase in medical_phrases) and "авто" not in text_lower:
-        return True
-        
-    # Проверяем юридические фразы
-    if any(phrase in text_lower for phrase in legal_phrases):
-        return True
-        
-    return False
-
 # ==================== TELEGRAM HANDLERS ====================
 
 @secure_handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     try:
+        user_id = update.effective_user.id
+        log_user_action(user_id, "start", "User initiated /start command")
+        
         # Симуляция печатания
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         await asyncio.sleep(random.uniform(1.5, 3.0))
@@ -398,17 +447,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(welcome_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
-        logger.info(f"Отправлено приветственное сообщение пользователю {update.effective_user.id}")
+        logger.info(f"Отправлено приветственное сообщение пользователю {user_id}")
+        log_user_action(user_id, "start_success", "Welcome message sent")
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике start: {e}")
         error_msg = escape_markdown_text("Добро пожаловать! Чем могу помочь?")
         await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
+        log_user_action(update.effective_user.id, "start_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /services"""
     try:
+        user_id = update.effective_user.id
+        log_user_action(user_id, "services", "User requested services list")
+        
         # Симуляция печатания
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         await asyncio.sleep(random.uniform(2.0, 4.0))
@@ -428,17 +482,22 @@ async def handle_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(services_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
-        logger.info(f"Отправлен список услуг пользователю {update.effective_user.id}")
+        logger.info(f"Отправлен список услуг пользователю {user_id}")
+        log_user_action(user_id, "services_success", "Services list sent")
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике services: {e}")
         error_msg = escape_markdown_text("Извините, произошла ошибка при загрузке услуг.")
         await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
+        log_user_action(update.effective_user.id, "services_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /faq - показывает меню с FAQ"""
     try:
+        user_id = update.effective_user.id
+        log_user_action(user_id, "faq", "User requested FAQ menu")
+        
         # Создаем клавиатуру с кнопками FAQ
         keyboard = []
         for key, data in FAQ_CARDS.items():
@@ -460,25 +519,33 @@ async def handle_faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='MarkdownV2',
             reply_markup=reply_markup
         )
-        logger.info(f"Показано меню FAQ пользователю {update.effective_user.id}")
+        logger.info(f"Показано меню FAQ пользователю {user_id}")
+        log_user_action(user_id, "faq_success", "FAQ menu shown")
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике FAQ: {e}")
         error_msg = escape_markdown_text("Извините, произошла ошибка при загрузке меню.")
         await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
+        log_user_action(update.effective_user.id, "faq_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик медиа-файлов"""
     try:
+        user_id = update.effective_user.id
+        log_user_action(user_id, "media", "User sent media file")
+        
         error_msg = escape_markdown_text(
             "📎 Я обрабатываю только текстовые сообщения. "
             "Опишите вашу проблему текстом, и я с радостью помогу!"
         )
         await update.message.reply_text(error_msg, parse_mode='MarkdownV2')
-        logger.info(f"Получен медиа-файл от пользователя {update.effective_user.id}")
+        logger.info(f"Получен медиа-файл от пользователя {user_id}")
+        log_user_action(user_id, "media_response", "Media response sent")
+        
     except Exception as e:
         logger.error(f"Ошибка в обработчике медиа: {e}")
+        log_user_action(update.effective_user.id, "media_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -493,6 +560,8 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if callback_data.startswith("faq_"):
             # Показываем ответ на вопрос
             faq_key = callback_data[4:]  # Убираем префикс "faq_"
+            log_user_action(user_id, "faq_selected", f"Selected FAQ: {faq_key}")
+            
             if faq_key in FAQ_CARDS:
                 answer = FAQ_CARDS[faq_key]["answer"]
                 
@@ -508,9 +577,12 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                     reply_markup=reply_markup
                 )
                 logger.info(f"Показан ответ на вопрос {faq_key} пользователю {user_id}")
+                log_user_action(user_id, "faq_answer_shown", f"FAQ answer shown: {faq_key}")
         
         elif callback_data == "back_to_faq":
             # Возвращаемся к меню FAQ
+            log_user_action(user_id, "faq_back", "Returned to FAQ menu")
+            
             keyboard = []
             for key, data in FAQ_CARDS.items():
                 keyboard.append([InlineKeyboardButton(data["question"], callback_data=f"faq_{key}")])
@@ -532,6 +604,8 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             
         elif callback_data == "back_to_main":
             # Возвращаемся к главному меню (стартовому сообщению)
+            log_user_action(user_id, "main_menu_back", "Returned to main menu")
+            
             welcome_msg = escape_markdown_text(
                 "Привет! 👋\n\n"
                 f"Я ассистент студии детейлинга «{SALON_CONFIG['name']}». Чем могу помочь?\n\n"
@@ -560,6 +634,7 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Ошибка обработки callback: {e}")
         error_msg = escape_markdown_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
         await query.edit_message_text(error_msg, parse_mode='MarkdownV2')
+        log_user_action(user_id, "callback_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -567,8 +642,11 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    user_id = query.from_user.id
+    
     try:
         if query.data == "show_faq":
+            log_user_action(user_id, "main_menu", "Selected FAQ from main menu")
             # Показываем меню FAQ
             keyboard = []
             for key, data in FAQ_CARDS.items():
@@ -590,6 +668,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         elif query.data == "show_services":
+            log_user_action(user_id, "main_menu", "Selected Services from main menu")
             # Показываем услуги
             services_text = "\n".join([f"• {service}: {price}" for service, price in SALON_CONFIG['services'].items()])
             
@@ -608,6 +687,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(services_msg, parse_mode='MarkdownV2', reply_markup=reply_markup)
             
         elif query.data == "show_contacts":
+            log_user_action(user_id, "main_menu", "Selected Contacts from main menu")
             # Показываем контакты
             contacts_msg = escape_markdown_text(
                 "📞 Наши контакты:\n\n"
@@ -631,6 +711,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка обработки главного меню: {e}")
         error_msg = escape_markdown_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
         await query.edit_message_text(error_msg, parse_mode='MarkdownV2')
+        log_user_action(user_id, "main_menu_error", f"Error: {str(e)}")
 
 @secure_handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -649,6 +730,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Логируем только факт получения сообщения без полного текста
         logger.info(f"Получено сообщение от {user_id}, длина: {len(user_text)} символов")
+        log_user_action(user_id, "message_received", f"Message length: {len(user_text)} chars")
         
         # Показываем статус "печатает"
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -656,9 +738,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Получаем ответ от GPT
         reply = await YandexGPTClient.generate_response(user_text)
         
+        # Проверяем безопасность ответа
+        if not check_response_safety(reply):
+            logger.warning(f"Ответ LLM содержит потенциально опасный контент: {reply[:100]}...")
+            reply = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте другой вопрос."
+            log_user_action(user_id, "response_safety_check", "Failed safety check")
+        
         # Ограничиваем длину ответа
-        if len(reply) > 2000:
-            reply = reply[:2000] + "..."
+        if len(reply) > CONFIG['MAX_TEXT_LENGTH']:
+            reply = reply[:CONFIG['MAX_TEXT_LENGTH']] + "..."
         
         # Симуляция человеческого печатания
         typing_time = await simulate_typing_with_errors(chat_id, context, reply)
@@ -670,6 +758,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Фильтрация нежелательных фраз
         if contains_banned_content(reply):
             reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
+            log_user_action(user_id, "banned_content", "Response contained banned content")
         
         # Добавляем профессиональное завершение к ответам
         if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
@@ -678,6 +767,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем ответ с MarkdownV2
         await update.message.reply_text(reply, parse_mode='MarkdownV2')
         logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
+        log_user_action(user_id, "response_sent", f"Response length: {len(reply)} chars")
         
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения: {e}")
@@ -691,6 +781,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Экранируем сообщение об ошибке
         escaped_error_msg = escape_markdown_text(error_msg)
         await update.message.reply_text(escaped_error_msg, parse_mode='MarkdownV2')
+        log_user_action(update.effective_user.id, "message_error", f"Error: {str(e)}")
 
 # ==================== WEBHOOK HANDLERS ====================
 
@@ -710,7 +801,7 @@ async def handle_webhook(request):
         logger.info(f"Получен вебхук #{update_id}")
         
         # Проверка безопасности на уровне вебхука
-        if not security.check_global_limit(max_requests=200, period=60):
+        if not security.check_global_limit(max_requests=CONFIG['MAX_REQUESTS_PER_MINUTE'], period=60):
             return web.Response(text="Rate limit exceeded", status=429)
         
         if bot_app is None:
