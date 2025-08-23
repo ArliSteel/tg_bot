@@ -11,7 +11,6 @@ import re
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
-from telegram.helpers import escape_markdown
 from security import security, secure_handler
 
 # Определяем окружение
@@ -137,6 +136,15 @@ bot_app = None
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
+def escape_markdown_text(text: str) -> str:
+    """Экранирует специальные символы MarkdownV2"""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
+def log_user_action(user_id, action, details):
+    """Логирует действия пользователя"""
+    logger.info(f"User {user_id}: {action} - {details}")
+
 def contains_banned_content(text):
     """Проверяет, содержит ли текст запрещенный контент"""
     text_lower = text.lower()
@@ -198,7 +206,7 @@ class YandexGPTClient:
         term_mapping = {
             "покраска": "нанесение ЛКП",
             "царапина": "нарушение целостности ЛКП",
-            "скол": "локальное повреждение ЛКП",
+            "скол": " локальное повреждение ЛКП",
             "полировка": "восстановление глянца ЛКП",
             "покрытие": "защитное керамическое покрытие",
             "чистка": "профессиональная химчистка"
