@@ -257,7 +257,8 @@ class SecuritySystem:
 # Инициализация системы безопасности
 security = SecuritySystem()
 
-# Декоратор для проверки безопасности
+# security.py - Исправленный декоратор secure_handler
+
 def secure_handler(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -273,13 +274,28 @@ def secure_handler(func):
             security.log_security_event(user_id, "BLOCKED_USER_ATTEMPT")
             return
         
-        # Проверка глобального лимита (только один раз)
+        # Проверка глобального лимита
         if not security.check_global_limit():
             await update.message.reply_text("⚠️ Система перегружена. Попробуйте позже.")
             return
         
-        # Проверка лимита для пользователя
-        if not security.check_rate_limit(user_id):
+        # ВАЖНО: Сначала проверяем лимит для пользователя
+        # НЕ добавляем запрос в историю, если лимит превышен
+        current_time = time.time()
+        period = SECURITY_CONFIG['USER_RATE_PERIOD']
+        max_requests = SECURITY_CONFIG['USER_RATE_LIMIT']
+        
+        # Очистка старых запросов
+        security.user_activity[user_id] = [
+            t for t in security.user_activity[user_id] 
+            if current_time - t < period
+        ]
+        
+        # Если лимит превышен, обрабатываем нарушение
+        if len(security.user_activity[user_id]) >= max_requests:
+            security.log_security_event(user_id, "RATE_LIMIT_EXCEEDED", 
+                                      f"Attempts: {len(security.user_activity[user_id])}")
+            
             # Добавляем предупреждение за превышение лимита
             warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
             
@@ -294,6 +310,9 @@ def secure_handler(func):
                     f"После {max_warnings} предупреждений вы будете заблокированы."
                 )
             return
+        
+        # Если лимит не превышен, добавляем запрос в историю
+        security.user_activity[user_id].append(current_time)
         
         # Проверка на опасные паттерны в сыром тексте
         raw_text = update.message.text
