@@ -257,8 +257,7 @@ class SecuritySystem:
 # Инициализация системы безопасности
 security = SecuritySystem()
 
-# security.py - Исправленный декоратор secure_handler
-
+# Исправленный декоратор secure_handler
 def secure_handler(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
