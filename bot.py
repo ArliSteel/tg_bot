@@ -14,28 +14,18 @@ from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandl
 from telegram.helpers import escape_markdown
 from security import security, secure_handler
 
-# Настройка логов с ротацией и маскированием конфиденциальных данных
+# Определяем окружение
+environment = os.getenv('ENVIRONMENT', 'staging')
+print(f"🚀 Запуск в окружении: {environment.upper()}")
+
+# Настройка логов с указанием окружения
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+    format=f'%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - {environment.upper()} - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Функция для экранирования Markdown
-def escape_markdown_text(text):
-    """Экранирование текста для MarkdownV2"""
-    if not text:
-        return ""
-    
-    # Используем встроенную функцию экранирования от Telegram
-    return escape_markdown(text, version=2)
-
-# Функция для аудита действий пользователя
-def log_user_action(user_id: int, action: str, details: str = ""):
-    """Логирование действий пользователя для аудита"""
-    logger.info(f"AUDIT - User {user_id} - {action} - {details}")
-
-# Загрузка и валидация переменных окружения
+# Загрузка конфигурации
 def load_config():
     """Загрузка и проверка конфигурации"""
     config = {
@@ -44,26 +34,26 @@ def load_config():
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET", "default_secret_token"),
         'YANDEX_API_KEY': os.getenv("YANDEX_API_KEY"),
         'YANDEX_FOLDER_ID': os.getenv("YANDEX_FOLDER_ID"),
-        # Параметры безопасности из переменных окружения
         'MAX_REQUESTS_PER_MINUTE': int(os.getenv("MAX_REQUESTS_PER_MINUTE", "200")),
         'MAX_TEXT_LENGTH': int(os.getenv("MAX_TEXT_LENGTH", "4000")),
         'BLOCK_DURATION': int(os.getenv("BLOCK_DURATION", "3600")),
         'WARNING_THRESHOLD': int(os.getenv("WARNING_THRESHOLD", "5")),
+        'ENVIRONMENT': environment
     }
     
-    missing_vars = [key for key, value in config.items() if not value and key not in ['WEBHOOK_SECRET', 'MAX_REQUESTS_PER_MINUTE', 'MAX_TEXT_LENGTH', 'BLOCK_DURATION', 'WARNING_THRESHOLD']]
+    # Проверка обязательных переменных
+    required_vars = ['BOT_TOKEN', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID']
+    missing_vars = [key for key in required_vars if not config[key]]
+    
     if missing_vars:
         logger.critical(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
         exit(1)
     
     # Маскируем чувствительные данные в логах
     masked_config = config.copy()
-    if masked_config['BOT_TOKEN']:
-        masked_config['BOT_TOKEN'] = masked_config['BOT_TOKEN'][:10] + '...'
-    if masked_config['YANDEX_API_KEY']:
-        masked_config['YANDEX_API_KEY'] = masked_config['YANDEX_API_KEY'][:10] + '...'
-    if masked_config['WEBHOOK_SECRET']:
-        masked_config['WEBHOOK_SECRET'] = masked_config['WEBHOOK_SECRET'][:10] + '...'
+    for key in ['BOT_TOKEN', 'YANDEX_API_KEY', 'WEBHOOK_SECRET']:
+        if masked_config[key]:
+            masked_config[key] = masked_config[key][:10] + '...'
     
     logger.info(f"Загружена конфигурация: {masked_config}")
     return config

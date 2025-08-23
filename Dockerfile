@@ -32,11 +32,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app \
-    # Безопасность: отключаем вывод трассировки Python при ошибках
     PYTHONTRACEMALLOC=0 \
-    # Устанавливаем стандартную локаль
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    ENVIRONMENT=production
 
 # Здоровье контейнера
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
