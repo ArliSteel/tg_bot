@@ -1,17 +1,17 @@
 services:
   - type: web
-    name: telegram-bot-staging
+    name: telegram-bot-production
     env: python
     plan: free
     dockerfilePath: ./Dockerfile
-    branch: staging
+    branch: main
     envVars:
       - key: ENVIRONMENT
-        value: staging
+        value: production
       - key: TELEGRAM_TOKEN
         fromSecret: true
       - key: WEBHOOK_URL
-        value: https://tg-bot-staging.onrender.com
+        value: https://tg-bot-production.onrender.com
       - key: YANDEX_API_KEY
         fromSecret: true
       - key: YANDEX_FOLDER_ID
@@ -19,10 +19,10 @@ services:
       - key: WEBHOOK_SECRET
         fromSecret: true
       - key: MAX_REQUESTS_PER_MINUTE
-        value: "50"
+        value: "200"
       - key: MAX_TEXT_LENGTH
-        value: "1000"
+        value: "4000"
       - key: BLOCK_DURATION
-        value: "600"
+        value: "3600"
       - key: WARNING_THRESHOLD
-        value: "2"
+        value: "5"
