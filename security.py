@@ -79,6 +79,19 @@ class SecuritySystem:
         except Exception as e:
             logger.error(f"Failed to setup security log rotation: {e}")
     
+    def get_current_request_count(self, user_id, period=None):
+        """Возвращает текущее количество запросов пользователя за период"""
+        period = period or self.config['USER_RATE_PERIOD']
+        current_time = time.time()
+        
+        # Очистка старых запросов
+        self.user_activity[user_id] = [
+            t for t in self.user_activity[user_id] 
+            if current_time - t < period
+        ]
+        
+        return len(self.user_activity[user_id])
+    
     def detect_suspicious(self, text):
         """Обнаружение подозрительных паттернов с разделением на критические и не критические"""
         if not text or not isinstance(text, str):
@@ -95,20 +108,6 @@ class SecuritySystem:
                 return 'non_critical'
                 
         return None
-    
-    def get_current_request_count(self, user_id, period=None):
-        """Возвращает текущее количество запросов пользователя за период"""
-        period = period or self.config['USER_RATE_PERIOD']
-        
-        current_time = time.time()
-        
-        # Очистка старых запросов
-        self.user_activity[user_id] = [
-            t for t in self.user_activity[user_id] 
-            if current_time - t < period
-        ]
-        
-        return len(self.user_activity[user_id])
     
     def check_rate_limit(self, user_id, max_requests=None, period=None):
         """Проверка ограничения частоты запросов"""
@@ -192,7 +191,7 @@ class SecuritySystem:
         if not text or not isinstance(text, str):
             return ""
             
-        # Сначала проверка на опасные паттерны в сыром текста
+        # Сначала проверка на опасные паттерны в сыром тексте
         suspicious_type = self.detect_suspicious(text)
         if suspicious_type:
             self.log_security_event("INPUT_VALIDATION", f"SUSPICIOUS_PATTERN_{suspicious_type.upper()}",
@@ -292,41 +291,6 @@ def secure_handler(func):
         if not security.check_global_limit():
             await update.message.reply_text("⚠️ Система перегружена. Попробуйте позже.")
             return
-        
-        # ВАЖНО: Сначала проверяем лимит для пользователя
-        # НЕ добавляем запрос в историю, если лимит превышен
-        current_time = time.time()
-        period = security.config['USER_RATE_PERIOD']
-        max_requests = security.config['USER_RATE_LIMIT']
-        
-        # Очистка старых запросов
-        security.user_activity[user_id] = [
-            t for t in security.user_activity[user_id] 
-            if current_time - t < period
-        ]
-        
-        # Если лимит превышен, обрабатываем нарушение
-        if len(security.user_activity[user_id]) >= max_requests:
-            security.log_security_event(user_id, "RATE_LIMIT_EXCEEDED", 
-                                      f"Attempts: {len(security.user_activity[user_id])}")
-            
-            # Добавляем предупреждение за превышение лимита
-            warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
-            
-            if warning_exceeded:
-                await security.block_user(user_id)
-                await update.message.reply_text("⛔ Вы заблокированы за многократное превышение лимита запросов.")
-            else:
-                warning_count = security.get_warning_count(user_id)
-                max_warnings = security.config['WARNING_THRESHOLD']
-                await update.message.reply_text(
-                    f"⚠️ Слишком много запросов. Предупреждение {warning_count}/{max_warnings}. "
-                    f"После {max_warnings} предупреждений вы будете заблокированы."
-                )
-            return
-        
-        # Если лимит не превышен, добавляем запрос в историю
-        security.user_activity[user_id].append(current_time)
         
         # Проверка на опасные паттерны в сыром тексте
         raw_text = update.message.text

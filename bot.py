@@ -136,8 +136,8 @@ bot_app = None
 
 # Глобальные переменные для обработки сообщений
 user_message_queues = {}
-message_processing_lock = asyncio.Lock()
-last_activity = {}
+user_processing_tasks = {}
+processing_lock = asyncio.Lock()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -202,85 +202,113 @@ def check_response_safety(text):
 
 async def process_user_messages(user_id, chat_id, context):
     """Обрабатывает все сообщения пользователя за раз"""
-    async with message_processing_lock:
-        if user_id not in user_message_queues or not user_message_queues[user_id]:
+    try:
+        # Ждем 1 секунду для получения возможных дополнительных сообщений
+        await asyncio.sleep(1.0)
+        
+        async with processing_lock:
+            if user_id not in user_message_queues or not user_message_queues[user_id]:
+                return
+            
+            # Получаем все сообщения из очереди
+            messages = user_message_queues[user_id].copy()
+            user_message_queues[user_id] = []
+            
+            # Удаляем задачу обработки
+            if user_id in user_processing_tasks:
+                del user_processing_tasks[user_id]
+        
+        # Проверяем лимиты без добавления запросов
+        current_count = security.get_current_request_count(user_id)
+        max_requests = security.config['USER_RATE_LIMIT']
+        
+        if current_count + len(messages) > max_requests:
+            # Превышение лимита - добавляем предупреждение
+            warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
+            
+            if warning_exceeded:
+                await security.block_user(user_id)
+                await context.bot.send_message(chat_id, "⛔ Вы заблокированы за спам.")
+            else:
+                warning_count = security.get_warning_count(user_id)
+                max_warnings = security.config['WARNING_THRESHOLD']
+                await context.bot.send_message(
+                    chat_id,
+                    f"⚠️ Слишком много сообщений. Предупреждение {warning_count}/{max_warnings}."
+                )
+            
+            # Добавляем запросы в историю (по одному на каждое сообщение)
+            for _ in range(len(messages)):
+                security.user_activity[user_id].append(time.time())
             return
         
-        # Получаем все сообщения из очереди
-        messages = user_message_queues[user_id].copy()
-        user_message_queues[user_id] = []
-    
-    # Проверяем лимиты без добавления запросов
-    current_count = security.get_current_request_count(user_id)
-    if current_count + len(messages) > security.config['USER_RATE_LIMIT']:
-        warning_count = security.get_warning_count(user_id)
-        max_warnings = security.config['WARNING_THRESHOLD']
+        # Добавляем запросы в историю (по одному на каждое сообщение)
+        for _ in range(len(messages)):
+            security.user_activity[user_id].append(time.time())
         
-        # Добавляем предупреждение
-        warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
+        # Объединяем сообщения в один текст (исключаем дубликаты)
+        unique_messages = []
+        for msg in messages:
+            if msg not in unique_messages:
+                unique_messages.append(msg)
         
-        if warning_exceeded:
-            await security.block_user(user_id)
-            await context.bot.send_message(chat_id, "⛔ Вы заблокированы за спам.")
-        else:
-            await context.bot.send_message(
-                chat_id,
-                f"⚠️ Слишком много сообщений. Предупреждение {warning_count}/{max_warnings}."
-            )
-        return
-    
-    # Добавляем запросы в историю (по одному на каждое сообщение)
-    for _ in range(len(messages)):
-        security.user_activity[user_id].append(time.time())
-    
-    # Объединяем сообщения в один текст
-    combined_text = " ".join(messages)
-    
-    # Генерируем ответ
-    reply = await YandexGPTClient.generate_response(combined_text)
-    
-    # Проверяем безопасность ответа
-    if not check_response_safety(reply):
-        logger.warning(f"Ответ LLM содержит потенциально опасный контент: {reply[:100]}...")
-        reply = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте другой вопрос."
-        log_user_action(user_id, "response_safety_check", "Failed safety check")
-    
-    # Ограничиваем длину ответа
-    if len(reply) > CONFIG['MAX_TEXT_LENGTH']:
-        reply = reply[:CONFIG['MAX_TEXT_LENGTH']] + "..."
-    
-    # Симуляция человеческого печатания
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-    typing_time = await simulate_typing_with_errors(chat_id, context, reply)
-    logger.info(f"Симуляция печатания заняла {typing_time:.2f} секунд")
-    
-    # Добавляем случайные опечатки для естественности
-    reply = await simulate_human_typing_mistakes(reply)
-    
-    # Фильтрация нежелательных фраз
-    if contains_banned_content(reply):
-        reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
-        log_user_action(user_id, "banned_content", "Response contained banned content")
-    
-    # Добавляем профессиональное завершение к ответам
-    if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
-        reply += f"\n\n📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
-    
-    # Отправляем ответ с MarkdownV2
-    await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-    logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
-    log_user_action(user_id, "response_sent", f"Response length: {len(reply)} chars")
+        combined_text = " ".join(unique_messages)
+        
+        # Генерируем ответ
+        reply = await YandexGPTClient.generate_response(combined_text)
+        
+        # Проверяем безопасность ответа
+        if not check_response_safety(reply):
+            logger.warning(f"Ответ LLM содержит потенциально опасный контент: {reply[:100]}...")
+            reply = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте другой вопрос."
+            log_user_action(user_id, "response_safety_check", "Failed safety check")
+        
+        # Ограничиваем длину ответа
+        if len(reply) > CONFIG['MAX_TEXT_LENGTH']:
+            reply = reply[:CONFIG['MAX_TEXT_LENGTH']] + "..."
+        
+        # Симуляция человеческого печатания
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        typing_time = await simulate_typing_with_errors(chat_id, context, reply)
+        logger.info(f"Симуляция печатания заняла {typing_time:.2f} секунд")
+        
+        # Добавляем случайные опечатки для естественности
+        reply = await simulate_human_typing_mistakes(reply)
+        
+        # Фильтрация нежелательных фраз
+        if contains_banned_content(reply):
+            reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
+            log_user_action(user_id, "banned_content", "Response contained banned content")
+        
+        # Добавляем профессиональное завершение к ответам
+        if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
+            reply += f"\n\n📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+        
+        # Отправляем ответ с MarkdownV2
+        await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
+        logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
+        log_user_action(user_id, "response_sent", f"Response length: {len(reply)} chars")
+        
+    except asyncio.CancelledError:
+        # Задача была отменена, это нормально
+        pass
+    except Exception as e:
+        logger.error(f"Ошибка в process_user_messages: {e}")
 
 async def cleanup_message_queues():
     """Очищает старые очереди сообщений"""
     while True:
         await asyncio.sleep(300)  # Каждые 5 минут
         current_time = time.time()
-        async with message_processing_lock:
+        async with processing_lock:
             for user_id in list(user_message_queues.keys()):
                 # Если очередь пуста более 10 минут, удаляем ее
-                if not user_message_queues[user_id] and current_time - last_activity.get(user_id, 0) > 600:
+                if not user_message_queues[user_id]:
                     del user_message_queues[user_id]
+            for user_id in list(user_processing_tasks.keys()):
+                # Если задача завершена, удаляем ее
+                if user_processing_tasks[user_id].done():
+                    del user_processing_tasks[user_id]
 
 # ==================== YANDEX GPT КЛИЕНТ ====================
 
@@ -350,7 +378,7 @@ class YandexGPTClient:
 {usp_text}
 
 **ПРАВИЛА ОБЩЕНИЯ:**
-1. Отвечай как живой человек, а не как бot
+1. Отвечай как живой человек, а не как бот
 2. Используй неформальный, но профессиональный стиль общения
 3. Можешь использовать разговорные выражения, соответствующие стилю общения автосервиса
 4. Иногда можешь делать небольшие опечатки для естественности
@@ -651,7 +679,7 @@ async def handle_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 answer = FAQ_CARDS[faq_key]["answer"]
                 
                 # Создаем клавиатуру для возврата
-                keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросы", callback_data="back_to_faq")]]
+                keyboard = [[InlineKeyboardButton("⬅️ Назад к вопросам", callback_data="back_to_faq")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 answer_text = escape_markdown_text(f"{answer}\n\nЕсть дополнительные вопросы? Звоните: {SALON_CONFIG['contacts']}")
@@ -811,19 +839,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Инициализируем очередь для пользователя, если нужно
-        if user_id not in user_message_queues:
-            user_message_queues[user_id] = []
-        
-        # Добавляем сообщение в очередь
-        user_message_queues[user_id].append(context.safe_text)
-        last_activity[user_id] = time.time()
-        
-        # Ждем немного для получения возможных дополнительных сообщений
-        await asyncio.sleep(1.0)  # Ждем 1 секунду
-        
-        # Обрабатываем все сообщения
-        await process_user_messages(user_id, chat_id, context)
+        async with processing_lock:
+            # Инициализируем очередь для пользователя, если нужно
+            if user_id not in user_message_queues:
+                user_message_queues[user_id] = []
+            
+            # Добавляем сообщение в очередь
+            user_message_queues[user_id].append(context.safe_text)
+            
+            # Если уже есть задача обработки, отменяем ее
+            if user_id in user_processing_tasks:
+                try:
+                    user_processing_tasks[user_id].cancel()
+                except:
+                    pass
+            
+            # Создаем новую задачу обработки
+            user_processing_tasks[user_id] = asyncio.create_task(
+                process_user_messages(user_id, chat_id, context)
+            )
         
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения: {e}")
