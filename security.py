@@ -37,6 +37,7 @@ class SecuritySystem:
         self.global_activity = []
         self.blocked_users = {}
         self.user_warnings = defaultdict(list)  # user_id: list of (timestamp, reason)
+        self.config = SECURITY_CONFIG
         
         # Критические паттерны - немедленная блокировка
         self.critical_patterns = [
@@ -65,8 +66,8 @@ class SecuritySystem:
             
             log_handler = logging.handlers.RotatingFileHandler(
                 "logs/security.log",
-                maxBytes=SECURITY_CONFIG['LOG_MAX_BYTES'],
-                backupCount=SECURITY_CONFIG['LOG_BACKUP_COUNT'],
+                maxBytes=self.config['LOG_MAX_BYTES'],
+                backupCount=self.config['LOG_BACKUP_COUNT'],
                 encoding='utf-8'
             )
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -77,6 +78,19 @@ class SecuritySystem:
             security_logger.setLevel(logging.INFO)
         except Exception as e:
             logger.error(f"Failed to setup security log rotation: {e}")
+    
+    def get_current_request_count(self, user_id, period=None):
+        """Возвращает текущее количество запросов пользователя за период"""
+        period = period or self.config['USER_RATE_PERIOD']
+        current_time = time.time()
+        
+        # Очистка старых запросов
+        self.user_activity[user_id] = [
+            t for t in self.user_activity[user_id] 
+            if current_time - t < period
+        ]
+        
+        return len(self.user_activity[user_id])
     
     def detect_suspicious(self, text):
         """Обнаружение подозрительных паттернов с разделением на критические и не критические"""
@@ -97,8 +111,8 @@ class SecuritySystem:
     
     def check_rate_limit(self, user_id, max_requests=None, period=None):
         """Проверка ограничения частоты запросов"""
-        max_requests = max_requests or SECURITY_CONFIG['USER_RATE_LIMIT']
-        period = period or SECURITY_CONFIG['USER_RATE_PERIOD']
+        max_requests = max_requests or self.config['USER_RATE_LIMIT']
+        period = period or self.config['USER_RATE_PERIOD']
         
         current_time = time.time()
         
@@ -118,8 +132,8 @@ class SecuritySystem:
     
     def check_global_limit(self, max_requests=None, period=None):
         """Глобальное ограничение запросов"""
-        max_requests = max_requests or SECURITY_CONFIG['GLOBAL_RATE_LIMIT']
-        period = period or SECURITY_CONFIG['GLOBAL_RATE_PERIOD']
+        max_requests = max_requests or self.config['GLOBAL_RATE_LIMIT']
+        period = period or self.config['GLOBAL_RATE_PERIOD']
         
         current_time = time.time()
         self.global_activity = [
@@ -142,7 +156,7 @@ class SecuritySystem:
         # Очищаем старые предупреждения
         self.user_warnings[user_id] = [
             (t, r) for t, r in self.user_warnings[user_id] 
-            if current_time - t < SECURITY_CONFIG['WARNING_DURATION']
+            if current_time - t < self.config['WARNING_DURATION']
         ]
         
         # Добавляем новое предупреждение
@@ -153,7 +167,7 @@ class SecuritySystem:
                               f"Reason: {reason}, Count: {len(self.user_warnings[user_id])}")
         
         # Проверяем, превышен ли лимит предупреждений
-        if len(self.user_warnings[user_id]) >= SECURITY_CONFIG['WARNING_THRESHOLD']:
+        if len(self.user_warnings[user_id]) >= self.config['WARNING_THRESHOLD']:
             self.log_security_event(user_id, "WARNING_LIMIT_EXCEEDED",
                                   f"Warning count: {len(self.user_warnings[user_id])}")
             return True
@@ -167,7 +181,7 @@ class SecuritySystem:
         # Очищаем старые предупреждения
         self.user_warnings[user_id] = [
             (t, r) for t, r in self.user_warnings[user_id] 
-            if current_time - t < SECURITY_CONFIG['WARNING_DURATION']
+            if current_time - t < self.config['WARNING_DURATION']
         ]
         
         return len(self.user_warnings[user_id])
@@ -185,15 +199,15 @@ class SecuritySystem:
             return None
             
         # Ограничение длины
-        if len(text) > SECURITY_CONFIG['MAX_TEXT_LENGTH']:
-            text = text[:SECURITY_CONFIG['MAX_TEXT_LENGTH']]
+        if len(text) > self.config['MAX_TEXT_LENGTH']:
+            text = text[:self.config['MAX_TEXT_LENGTH']]
         
         # Экранирование HTML
         return html.escape(text)
     
     async def block_user(self, user_id, duration=None):
         """Блокировка пользователя на определенное время с автоматической разблокировкой"""
-        duration = duration or SECURITY_CONFIG['DEFAULT_BLOCK_DURATION']
+        duration = duration or self.config['DEFAULT_BLOCK_DURATION']
         unblock_time = time.time() + duration
         
         self.blocked_users[user_id] = unblock_time
@@ -278,41 +292,6 @@ def secure_handler(func):
             await update.message.reply_text("⚠️ Система перегружена. Попробуйте позже.")
             return
         
-        # ВАЖНО: Сначала проверяем лимит для пользователя
-        # НЕ добавляем запрос в историю, если лимит превышен
-        current_time = time.time()
-        period = SECURITY_CONFIG['USER_RATE_PERIOD']
-        max_requests = SECURITY_CONFIG['USER_RATE_LIMIT']
-        
-        # Очистка старых запросов
-        security.user_activity[user_id] = [
-            t for t in security.user_activity[user_id] 
-            if current_time - t < period
-        ]
-        
-        # Если лимит превышен, обрабатываем нарушение
-        if len(security.user_activity[user_id]) >= max_requests:
-            security.log_security_event(user_id, "RATE_LIMIT_EXCEEDED", 
-                                      f"Attempts: {len(security.user_activity[user_id])}")
-            
-            # Добавляем предупреждение за превышение лимита
-            warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
-            
-            if warning_exceeded:
-                await security.block_user(user_id)
-                await update.message.reply_text("⛔ Вы заблокированы за многократное превышение лимита запросов.")
-            else:
-                warning_count = security.get_warning_count(user_id)
-                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
-                await update.message.reply_text(
-                    f"⚠️ Слишком много запросов. Предупреждение {warning_count}/{max_warnings}. "
-                    f"После {max_warnings} предупреждений вы будете заблокированы."
-                )
-            return
-        
-        # Если лимит не превышен, добавляем запрос в историю
-        security.user_activity[user_id].append(current_time)
-        
         # Проверка на опасные паттерны в сыром тексте
         raw_text = update.message.text
         suspicious_type = security.detect_suspicious(raw_text)
@@ -331,7 +310,7 @@ def secure_handler(func):
                 await update.message.reply_text("❌ Вы заблокированы за многократные нарушения.")
             else:
                 warning_count = security.get_warning_count(user_id)
-                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
+                max_warnings = security.config['WARNING_THRESHOLD']
                 await update.message.reply_text(
                     f"⚠️ Обнаружены подозрительные символы. Предупреждение {warning_count}/{max_warnings}. "
                     f"После {max_warnings} предупреждений вы будете заблокированы."
@@ -349,7 +328,7 @@ def secure_handler(func):
                 await update.message.reply_text("❌ Вы заблокированы за многократные нарушения.")
             else:
                 warning_count = security.get_warning_count(user_id)
-                max_warnings = SECURITY_CONFIG['WARNING_THRESHOLD']
+                max_warnings = security.config['WARNING_THRESHOLD']
                 await update.message.reply_text(
                     f"⚠️ Обнаружены недопустимые символы. Предупреждение {warning_count}/{max_warnings}. "
                     f"После {max_warnings} предупреждений вы будете заблокированы."
