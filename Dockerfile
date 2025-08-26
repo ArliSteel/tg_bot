@@ -42,4 +42,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
 # Используем exec форму для корректной обработки сигналов
-CMD ["python", "-u", "bot.py"]
+# Запускаем через модуль bot вместо bot.py
+CMD ["python", "-u", "-m", "bot"]
