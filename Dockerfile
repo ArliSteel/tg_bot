@@ -16,8 +16,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Копируем исходный код
-COPY . .
+# Копируем исходный код (сначала копируем только нужные директории)
+COPY bot/ ./bot/
+COPY *.py ./
+COPY *.txt ./
 
 # Меняем владельца файлов
 RUN chown -R botuser:botuser /app
@@ -42,5 +44,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
 # Используем exec форму для корректной обработки сигналов
-# Запускаем через модуль bot вместо bot.py
 CMD ["python", "-u", "-m", "bot"]
