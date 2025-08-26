@@ -16,10 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Копируем исходный код (сначала копируем только нужные директории)
-COPY bot/ ./bot/
-COPY *.py ./
-COPY *.txt ./
+# Копируем весь проект (включая все файлы и папки)
+COPY . .
+
+# Убедимся, что структура проекта правильная
+RUN find . -name "*.py" -exec echo "Found: {}" \;
 
 # Меняем владельца файлов
 RUN chown -R botuser:botuser /app
