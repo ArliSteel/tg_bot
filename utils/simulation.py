@@ -1,9 +1,9 @@
 import random
 import time
 import asyncio
-from config import load_config
 
-config = load_config()
+# Не загружаем конфиг на уровне модуля, чтобы избежать ошибок при импорте
+# Вместо этого будем загружать внутри функций при необходимости
 
 HUMAN_SIMULATION = {
     "min_typing_delay": 2,
@@ -12,6 +12,11 @@ HUMAN_SIMULATION = {
     "typing_variation": 0.3,
     "error_probability": 0.05,
 }
+
+def get_config():
+    """Ленивая загрузка конфигурации"""
+    from config import load_config
+    return load_config()
 
 async def simulate_typing(chat_id, context, text_length):
     """Симуляция печатания человека с учетом длины текста"""

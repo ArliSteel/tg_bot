@@ -22,24 +22,36 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Игнорировать лишние переменные
 
 def load_config():
     """Загрузка и проверка конфигурации"""
-    config = Settings()
-    
-    # Проверка обязательных переменных
-    required_vars = ['bot_token', 'yandex_api_key', 'yandex_folder_id']
-    missing_vars = [key for key in required_vars if not getattr(config, key)]
-    
-    if missing_vars:
-        logger.critical(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
+    try:
+        config = Settings()
+        
+        # Проверка обязательных переменных
+        required_vars = ['bot_token', 'yandex_api_key', 'yandex_folder_id']
+        missing_vars = [key for key in required_vars if not getattr(config, key)]
+        
+        if missing_vars:
+            logger.critical(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
+            logger.critical("Пожалуйста, установите следующие переменные окружения:")
+            logger.critical(" - TELEGRAM_TOKEN: Токен вашего Telegram бота")
+            logger.critical(" - YANDEX_API_KEY: API ключ Yandex Cloud")
+            logger.critical(" - YANDEX_FOLDER_ID: ID папки Yandex Cloud")
+            exit(1)
+        
+        # Маскируем чувствительные данные в логах
+        masked_config = config.dict()
+        for key in ['bot_token', 'yandex_api_key', 'webhook_secret']:
+            if masked_config[key]:
+                masked_config[key] = masked_config[key][:10] + '...'
+        
+        logger.info(f"Загружена конфигурация: {masked_config}")
+        return config
+        
+    except Exception as e:
+        logger.critical(f"Ошибка загрузки конфигурации: {e}")
+        logger.critical("Убедитесь, что все обязательные переменные окружения установлены:")
+        logger.critical("TELEGRAM_TOKEN, YANDEX_API_KEY, YANDEX_FOLDER_ID")
         exit(1)
-    
-    # Маскируем чувствительные данные в логах
-    masked_config = config.dict()
-    for key in ['bot_token', 'yandex_api_key', 'webhook_secret']:
-        if masked_config[key]:
-            masked_config[key] = masked_config[key][:10] + '...'
-    
-    logger.info(f"Загружена конфигурация: {masked_config}")
-    return config
