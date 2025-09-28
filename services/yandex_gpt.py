@@ -6,7 +6,6 @@ from utils.formatting import escape_markdown_text
 from models.config import SALON_CONFIG
 
 logger = logging.getLogger(__name__)
-config = load_config()
 
 class YandexGPTClient:
     """Клиент для работы с Yandex GPT API"""
@@ -96,9 +95,11 @@ class YandexGPTClient:
     @staticmethod
     async def generate_response(user_message: str) -> str:
         """Генерация ответа через YandexGPT API"""
+        config = load_config()
+        
         headers = {
-            "Authorization": f"Bearer {config.YANDEX_API_KEY}",
-            "x-folder-id": config.YANDEX_FOLDER_ID,
+            "Authorization": f"Bearer {config.yandex_api_key}",
+            "x-folder-id": config.yandex_folder_id,
             "Content-Type": "application/json"
         }
         
@@ -106,7 +107,7 @@ class YandexGPTClient:
         system_prompt = YandexGPTClient.create_system_prompt()
         
         payload = {
-            "modelUri": f"gpt://{config.YANDEX_FOLDER_ID}/yandexgpt",
+            "modelUri": f"gpt://{config.yandex_folder_id}/yandexgpt",
             "completionOptions": {
                 "stream": False,
                 "temperature": 0.3,

@@ -27,7 +27,7 @@ async def handle_webhook(request):
         config = load_config()
         
         # Проверка секретного токена
-        expected_token = config.WEBHOOK_SECRET
+        expected_token = config.webhook_secret
         received_token = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
         
         if expected_token != received_token:
@@ -39,7 +39,7 @@ async def handle_webhook(request):
         logger.info(f"Получен вебхук #{update_id}")
         
         # Проверка безопасности на уровне вебхука
-        if not security.check_global_limit(max_requests=config.MAX_REQUESTS_PER_MINUTE, period=60):
+        if not security.check_global_limit(max_requests=config.max_requests_per_minute, period=60):
             return web.Response(text="Rate limit exceeded", status=429)
         
         if bot_app is None:
@@ -62,6 +62,19 @@ async def handle_health(request):
     """Проверка здоровья сервиса"""
     return web.Response(text="✅ Bot is alive and healthy")
 
+async def handle_debug(request):
+    """Endpoint для отладки переменных окружения"""
+    import os
+    debug_info = {
+        "TELEGRAM_TOKEN_set": bool(os.getenv("TELEGRAM_TOKEN")),
+        "YANDEX_API_KEY_set": bool(os.getenv("YANDEX_API_KEY")),
+        "YANDEX_FOLDER_ID_set": bool(os.getenv("YANDEX_FOLDER_ID")),
+        "WEBHOOK_URL": os.getenv("WEBHOOK_URL"),
+        "WEBHOOK_SECRET_set": bool(os.getenv("WEBHOOK_SECRET")),
+        "status": "healthy"
+    }
+    return web.json_response(debug_info)
+
 async def initialize_bot():
     """Инициализация бота один раз при старте"""
     global bot_app
@@ -70,7 +83,8 @@ async def initialize_bot():
         config = load_config()
         logger.info("Инициализация бота...")
         
-        bot_app = Application.builder().token(config.BOT_TOKEN).build()
+        # Исправляем регистр атрибутов
+        bot_app = Application.builder().token(config.bot_token).build()
         
         # Регистрация обработчиков
         register_base_handlers(bot_app)
@@ -83,12 +97,12 @@ async def initialize_bot():
         # Инициализация и установка вебхука с секретным токеном
         await bot_app.initialize()
         await bot_app.bot.set_webhook(
-            config.WEBHOOK_URL,
+            config.webhook_url,
             allowed_updates=["message", "callback_query"],
-            secret_token=config.WEBHOOK_SECRET
+            secret_token=config.webhook_secret
         )
         
-        logger.info(f"Вебхук установлен: {config.WEBHOOK_URL}")
+        logger.info(f"Вебхук установлен: {config.webhook_url}")
         logger.info("Бот успешно инициализирован")
         
     except Exception as e:
@@ -102,6 +116,7 @@ async def init_app():
     app = web.Application()
     app.router.add_post("/", handle_webhook)
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/debug", handle_debug)
     app.router.add_get("/", handle_health)
     
     return app
