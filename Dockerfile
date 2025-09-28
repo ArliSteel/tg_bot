@@ -16,15 +16,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Копируем исходный код
 COPY . .
 
-# Проверяем новую структуру проекта
-RUN echo "=== New project structure ===" && \
-    ls -la && \
-    echo "=== Handlers directory ===" && \
-    ls -la handlers/ && \
-    echo "=== Services directory ===" && \
-    ls -la services/ && \
-    echo "=== Main.py exists ===" && \
-    test -f main.py && echo "✅ YES" || echo "❌ NO"
+# Проверяем установленные пакеты (для отладки)
+RUN echo "=== Installed packages ===" && \
+    pip freeze
 
 EXPOSE 10000
 
