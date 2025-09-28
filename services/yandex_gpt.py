@@ -19,24 +19,21 @@ class YandexGPTClient:
     
     @staticmethod
     def format_with_markdown(text: str) -> str:
-        """Преобразует текст в правильный Markdown-формат с сохранением читаемости"""
+        """Преобразует текст в правильный Markdown-формат без лишних звездочек"""
         
         # Сохраняем переносы строк
         text = text.replace('\n\n', '§DOUBLE_NEWLINE§')
         text = text.replace('\n', '§SINGLE_NEWLINE§')
         
-        # Делаем жирными названия компании
+        # Делаем жирными только названия компании в кавычках
         text = re.sub(r'(«Right Style 89»)', r'**\1**', text)
-        text = re.sub(r'(Right Style 89)', r'**\1**', text)
         
-        # Делаем жирными цены (улучшенные паттерны)
+        # Делаем жирными цены - только полные фразы с ценами
         text = re.sub(r'(от\s+\d+\s*\d*\s*000\s*рубл[ейя])', r'**\1**', text, flags=re.IGNORECASE)
-        text = re.sub(r'(от\s+\d+\s*\d*\s*₽)', r'**\1**', text)
         text = re.sub(r'(\d+\s*000\s*рубл[ейя])', r'**\1**', text, flags=re.IGNORECASE)
-        text = re.sub(r'(\d+\s*₽)', r'**\1**', text)
         
-        # Делаем жирными ключевые услуги (точные совпадения)
-        key_services = [
+        # Делаем жирными только конкретные названия услуг полностью
+        exact_services = [
             'Комплексная полировка кузова',
             'Полировка фар и стоп-сигналов',
             'Керамическое покрытие',
@@ -44,21 +41,13 @@ class YandexGPTClient:
             'бесплатную диагностику'
         ]
         
-        for service in key_services:
-            pattern = re.escape(service)
-            text = re.sub(f'({pattern})', r'**\1**', text, flags=re.IGNORECASE)
+        for service in exact_services:
+            # Ищем точное совпадение
+            pattern = r'\b' + re.escape(service) + r'\b'
+            text = re.sub(pattern, f'**{service}**', text, flags=re.IGNORECASE)
         
-        # Делаем курсивными важные моменты о качестве
-        quality_terms = [
-            'гарантируем качество',
-            'профессиональные материалы',
-            'премиальными брендами',
-            '12 месяцев гарантии'
-        ]
-        
-        for term in quality_terms:
-            pattern = re.escape(term)
-            text = re.sub(f'({pattern})', r'*\1*', text, flags=re.IGNORECASE)
+        # НЕ ИСПОЛЬЗУЕМ курсив совсем - он добавляет лишние звездочки
+        # Убираем все форматирование курсивом
         
         # Возвращаем переносы строк ПЕРЕД экранированием
         text = text.replace('§DOUBLE_NEWLINE§', '\n\n')
