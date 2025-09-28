@@ -1,4 +1,3 @@
-# security.py
 import time
 import html
 import re
@@ -191,7 +190,7 @@ class SecuritySystem:
         if not text or not isinstance(text, str):
             return ""
             
-        # Сначала проверка на опасные паттерны в сыром тексте
+        # Сначала проверка на опасные паттерны в сыром текста
         suspicious_type = self.detect_suspicious(text)
         if suspicious_type:
             self.log_security_event("INPUT_VALIDATION", f"SUSPICIOUS_PATTERN_{suspicious_type.upper()}",

@@ -25,4 +25,4 @@ services:
       - key: BLOCK_DURATION
         value: "3600"
       - key: WARNING_THRESHOLD
-        value: "5"
+        value: "2"
