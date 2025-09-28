@@ -3,10 +3,10 @@ import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes, MessageHandler, filters
 
-from bot.models.config import SALON_CONFIG
-from bot.services.security import secure_handler
-from bot.services.state_manager import user_state
-from bot.utils.formatting import escape_markdown_text
+from models.config import SALON_CONFIG
+from services.security import secure_handler
+from services.state_manager import user_state
+from utils.formatting import escape_markdown_text
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Пропускаем команды меню
         user_text = update.message.text.lower()
         if user_text in ['меню', 'start', 'начать', 'faq', 'вопросы']:
-            from bot.handlers.base import start
+            from handlers.base import start
             await start(update, context)
             return
             

@@ -93,7 +93,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if query.data == "show_faq":
             logger.info(f"User {user_id}: main_menu - Selected FAQ from main menu")
             # Перенаправляем в обработчик FAQ
-            from bot.handlers.faq import handle_faq
+            from handlers.faq import handle_faq
             await handle_faq(update, context)
             
         elif query.data == "show_services":

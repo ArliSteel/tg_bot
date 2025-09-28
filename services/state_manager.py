@@ -1,12 +1,14 @@
 import asyncio
 import time
 import logging
+import re
 from collections import defaultdict
 from services.yandex_gpt import YandexGPTClient
 from services.security import security
 from utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
 from utils.formatting import escape_markdown_text
 from models.config import SALON_CONFIG
+from config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -168,12 +170,11 @@ class UserStateManager:
                 return False
                 
         # Проверяем на наличие конфиденциальных данных из конфига
-        from bot.config import load_config
         config = load_config()
         sensitive_data = [
-            config.BOT_TOKEN,
-            config.YANDEX_API_KEY,
-            config.WEBHOOK_SECRET,
+            config.bot_token,
+            config.yandex_api_key,
+            config.webhook_secret,
             SALON_CONFIG['contacts'],
         ]
         
