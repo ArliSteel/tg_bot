@@ -2,11 +2,11 @@ import asyncio
 import time
 import logging
 from collections import defaultdict
-from bot.services.yandex_gpt import YandexGPTClient
-from bot.services.security import security
-from bot.utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
-from bot.utils.formatting import escape_markdown_text
-from bot.models.config import SALON_CONFIG
+from services.yandex_gpt import YandexGPTClient
+from services.security import security
+from utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
+from utils.formatting import escape_markdown_text
+from models.config import SALON_CONFIG
 
 logger = logging.getLogger(__name__)
 

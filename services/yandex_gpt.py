@@ -1,9 +1,9 @@
 import httpx
 import re
 import logging
-from bot.config import load_config
-from bot.utils.formatting import escape_markdown_text
-from bot.models.config import SALON_CONFIG
+from config import load_config
+from utils.formatting import escape_markdown_text
+from models.config import SALON_CONFIG
 
 logger = logging.getLogger(__name__)
 config = load_config()

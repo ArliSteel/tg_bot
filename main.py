@@ -4,15 +4,15 @@ import json
 import logging
 from aiohttp import web
 
-from bot.config import load_config
+from config import load_config
 from telegram import Update
 from telegram.ext import Application
-from bot.handlers.base import register_base_handlers
-from bot.handlers.faq import register_faq_handlers
-from bot.handlers.messages import register_message_handlers
-from bot.services.state_manager import user_state
-from bot.services.security import security
-from bot.utils.logging import setup_logging
+from handlers.base import register_base_handlers
+from handlers.faq import register_faq_handlers
+from handlers.messages import register_message_handlers
+from services.state_manager import user_state
+from services.security import security
+from utils.logging import setup_logging
 
 # Настройка логирования
 setup_logging(environment=os.getenv('ENVIRONMENT', 'staging'))

@@ -4,9 +4,9 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
-from bot.services.security import secure_handler
-from bot.utils.formatting import escape_markdown_text
-from bot.models.config import SALON_CONFIG
+from services.security import secure_handler
+from utils.formatting import escape_markdown_text
+from models.config import SALON_CONFIG
 
 logger = logging.getLogger(__name__)
 

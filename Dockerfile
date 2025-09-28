@@ -16,13 +16,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Копируем исходный код
 COPY . .
 
-# Проверяем структуру проекта (для отладки)
-RUN echo "=== Project structure ===" && \
-    find . -name "*.py" | sort && \
-    echo "=== Bot directory ===" && \
-    ls -la bot/ && \
-    echo "=== Bot main.py ===" && \
-    test -f bot/main.py && echo "✅ Bot main.py exists" || echo "❌ Bot main.py missing"
+# Проверяем новую структуру проекта
+RUN echo "=== New project structure ===" && \
+    ls -la && \
+    echo "=== Handlers directory ===" && \
+    ls -la handlers/ && \
+    echo "=== Services directory ===" && \
+    ls -la services/ && \
+    echo "=== Main.py exists ===" && \
+    test -f main.py && echo "✅ YES" || echo "❌ NO"
 
 EXPOSE 10000
 
