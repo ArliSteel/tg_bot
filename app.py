@@ -20,7 +20,7 @@ try:
         if not os.path.exists(os.path.join(current_dir, dir_name)):
             raise ImportError(f"Directory {dir_name} not found")
     
-    # Импортируем и запускаем основное приложение
+    # Импортируем и запускаем основное приложение из main.py
     from main import main
     print("✅ Main module imported successfully")
     

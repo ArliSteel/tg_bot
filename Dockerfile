@@ -10,15 +10,20 @@ WORKDIR /app
 
 # Копируем и устанавливаем зависимости сначала для лучшего кэширования
 COPY requirements.txt .
+
+# Показываем содержимое requirements.txt для отладки
+RUN echo "=== Requirements.txt content ===" && \
+    cat requirements.txt
+
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Копируем исходный код
 COPY . .
 
-# Проверяем установленные пакеты (для отладки)
-RUN echo "=== Installed packages ===" && \
-    pip freeze
+# Проверяем структуру проекта
+RUN echo "=== Project structure ===" && \
+    find . -name "*.py" | head -20
 
 EXPOSE 10000
 
@@ -33,5 +38,5 @@ ENV PYTHONUNBUFFERED=1 \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
-# Используем exec форму для корректной обработки сигналов
-CMD ["python", "-u", "app.py"]
+# Запускаем main.py напрямую
+CMD ["python", "-u", "main.py"]
