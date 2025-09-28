@@ -188,35 +188,52 @@ class UserStateManager:
         """Проверяет ответ LLM на утечку конфиденциальной информации"""
         if not text:
             return True
-            
-        # Проверяем на утечку потенциальных секретов
+        
+        # Убираем из проверки публичную информацию, которая должна быть в ответах
+        config = load_config()
+        
+        # Список публичной информации, которая РАЗРЕШЕНА в ответах
+        allowed_public_info = [
+            SALON_CONFIG['contacts'],  # Публичный номер телефона
+            SALON_CONFIG['address'],   # Публичный адрес
+            SALON_CONFIG['name'],      # Название компании
+            config.webhook_url if config.webhook_url else "",  # URL вебхука (если публичный)
+        ]
+        
+        # Создаем временную копию текста без разрешенной публичной информации
+        temp_text = text
+        for allowed_info in allowed_public_info:
+            if allowed_info:
+                temp_text = temp_text.replace(str(allowed_info), "")
+        
+        # Проверяем на утечку РЕАЛЬНЫХ секретов (но не публичной информации)
         secret_patterns = [
-            r'[A-Za-z0-9]{32,}',  # Длинные строки, похожие на хэши/токены
-            r'password.*:.+',      # Упоминание паролей
-            r'token.*:.+',         # Упоминание токенов
-            r'api[_-]?key.*:.+',   # Упоминание API-ключей
-            r'secret.*:.+',        # Упоминание секретов
+            r'[A-Za-z0-9]{40,}',       # Очень длинные строки (токены/ключи)
+            r'sk-[A-Za-z0-9]{20,}',    # API ключи OpenAI
+            r'AKIA[0-9A-Z]{16}',       # AWS ключи
+            r'password\s*[:=]\s*\S+',  # Пароли в формате "password: xxx"
+            r'token\s*[:=]\s*[A-Za-z0-9]{20,}',  # Токены в формате "token: xxx"
+            r'api[_-]?key\s*[:=]\s*[A-Za-z0-9]{20,}',  # API ключи в формате "api_key: xxx"
+            r'secret\s*[:=]\s*[A-Za-z0-9]{20,}',  # Секреты в формате "secret: xxx"
         ]
         
         for pattern in secret_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, temp_text, re.IGNORECASE):
                 logger.warning(f"Обнаружена потенциальная утечка в ответе LLM: {pattern}")
                 return False
-                
-        # Проверяем на наличие конфиденциальных данных из конфига
-        config = load_config()
-        sensitive_data = [
+        
+        # Проверяем на наличие НАСТОЯЩИХ конфиденциальных данных (не публичных)
+        truly_sensitive_data = [
             config.bot_token,
             config.yandex_api_key,
             config.webhook_secret,
-            SALON_CONFIG['contacts'],
         ]
         
-        for data in sensitive_data:
-            if data and data in text:
-                logger.warning("Обнаружена утечка конфиденциальных данных в ответе LLM")
+        for data in truly_sensitive_data:
+            if data and len(str(data)) > 10 and str(data) in text:
+                logger.warning("Обнаружена утечка НАСТОЯЩИХ конфиденциальных данных в ответе LLM")
                 return False
-                
+        
         return True
     
     async def cleanup_queues(self):
