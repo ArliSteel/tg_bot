@@ -124,27 +124,32 @@ class UserStateManager:
             if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
                 reply += f"\n\n📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
             
-            # ВАЖНАЯ ПРОВЕРКА: Проверяем корректность MarkdownV2 перед отправкой
+            # Пробуем отправить с MarkdownV2
             try:
-                # Пытаемся отправить тестовое сообщение для проверки
-                test_msg = await context.bot.send_message(
-                    chat_id, 
-                    "✍️ Печатаю ответ...", 
-                    parse_mode='MarkdownV2'
-                )
-                # Если тест прошел, удаляем тестовое сообщение
-                await context.bot.delete_message(chat_id, test_msg.message_id)
+                # Импортируем функцию валидации
+                from utils.formatting import validate_markdown
                 
-                # Отправляем основной ответ
-                await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-                logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
-                
+                # Проверяем корректность MarkdownV2
+                if validate_markdown(reply):
+                    await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
+                    logger.info(f"Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
+                else:
+                    # Если валидация не прошла - отправляем без форматирования
+                    clean_reply = self.strip_markdown(reply)
+                    await context.bot.send_message(chat_id, clean_reply)
+                    logger.info(f"Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
+                    
             except Exception as parse_error:
-                logger.error(f"Ошибка парсинга MarkdownV2: {parse_error}")
-                # Отправляем без форматирования в случае ошибки
+                logger.warning(f"Ошибка отправки с MarkdownV2: {parse_error}")
+                # Отправляем без форматирования
                 clean_reply = self.strip_markdown(reply)
-                await context.bot.send_message(chat_id, clean_reply)
-                logger.info(f"Отправлен ответ БЕЗ форматирования пользователю {user_id}")
+                try:
+                    await context.bot.send_message(chat_id, clean_reply)
+                    logger.info(f"Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
+                except Exception as final_error:
+                    logger.error(f"Критическая ошибка отправки сообщения: {final_error}")
+                    # Последняя попытка с минимальным сообщением
+                    await context.bot.send_message(chat_id, "Извините, произошла техническая ошибка. Попробуйте позже.")
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально
@@ -159,7 +164,8 @@ class UserStateManager:
         # Удаляем все markdown символы
         text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Жирный текст
         text = re.sub(r'\*([^*]+)\*', r'\1', text)      # Курсив
-        text = re.sub(r'\\([_\[\]()~`>#+=|{}.!-])', r'\1', text)  # Экранированные символы
+        # Убираем экранированные символы
+        text = re.sub(r'\\([_\[\]()~`>#+=|{}.!-])', r'\1', text)
         return text
     
     def contains_banned_content(self, text):
