@@ -122,17 +122,51 @@ class UserStateManager:
             
             # Добавляем профессиональное завершение к ответам
             if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
-                reply += f"\n\n📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+                reply += f"\n\n📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
             
-            # Отправляем ответ с MarkdownV2
-            await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-            logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
+            # Пробуем отправить с MarkdownV2
+            try:
+                # Импортируем функцию валидации
+                from utils.formatting import validate_markdown
+                
+                # Проверяем корректность MarkdownV2
+                if validate_markdown(reply):
+                    await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
+                    logger.info(f"Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
+                else:
+                    # Если валидация не прошла - отправляем без форматирования
+                    clean_reply = self.strip_markdown(reply)
+                    await context.bot.send_message(chat_id, clean_reply)
+                    logger.info(f"Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
+                    
+            except Exception as parse_error:
+                logger.warning(f"Ошибка отправки с MarkdownV2: {parse_error}")
+                # Отправляем без форматирования
+                clean_reply = self.strip_markdown(reply)
+                try:
+                    await context.bot.send_message(chat_id, clean_reply)
+                    logger.info(f"Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
+                except Exception as final_error:
+                    logger.error(f"Критическая ошибка отправки сообщения: {final_error}")
+                    # Последняя попытка с минимальным сообщением
+                    await context.bot.send_message(chat_id, "Извините, произошла техническая ошибка. Попробуйте позже.")
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально
             pass
         except Exception as e:
             logger.error(f"Ошибка в process_user_messages: {e}")
+    
+    def strip_markdown(self, text):
+        """Удаляет все Markdown символы из текста"""
+        if not text:
+            return ""
+        # Удаляем все markdown символы
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Жирный текст
+        text = re.sub(r'\*([^*]+)\*', r'\1', text)      # Курсив
+        # Убираем экранированные символы
+        text = re.sub(r'\\([_\[\]()~`>#+=|{}.!-])', r'\1', text)
+        return text
     
     def contains_banned_content(self, text):
         """Проверяет, содержит ли текст запрещенный контент"""
@@ -154,35 +188,52 @@ class UserStateManager:
         """Проверяет ответ LLM на утечку конфиденциальной информации"""
         if not text:
             return True
-            
-        # Проверяем на утечку потенциальных секретов
+        
+        # Убираем из проверки публичную информацию, которая должна быть в ответах
+        config = load_config()
+        
+        # Список публичной информации, которая РАЗРЕШЕНА в ответах
+        allowed_public_info = [
+            SALON_CONFIG['contacts'],  # Публичный номер телефона
+            SALON_CONFIG['address'],   # Публичный адрес
+            SALON_CONFIG['name'],      # Название компании
+            config.webhook_url if config.webhook_url else "",  # URL вебхука (если публичный)
+        ]
+        
+        # Создаем временную копию текста без разрешенной публичной информации
+        temp_text = text
+        for allowed_info in allowed_public_info:
+            if allowed_info:
+                temp_text = temp_text.replace(str(allowed_info), "")
+        
+        # Проверяем на утечку РЕАЛЬНЫХ секретов (но не публичной информации)
         secret_patterns = [
-            r'[A-Za-z0-9]{32,}',  # Длинные строки, похожие на хэши/токены
-            r'password.*:.+',      # Упоминание паролей
-            r'token.*:.+',         # Упоминание токенов
-            r'api[_-]?key.*:.+',   # Упоминание API-ключей
-            r'secret.*:.+',        # Упоминание секретов
+            r'[A-Za-z0-9]{40,}',       # Очень длинные строки (токены/ключи)
+            r'sk-[A-Za-z0-9]{20,}',    # API ключи OpenAI
+            r'AKIA[0-9A-Z]{16}',       # AWS ключи
+            r'password\s*[:=]\s*\S+',  # Пароли в формате "password: xxx"
+            r'token\s*[:=]\s*[A-Za-z0-9]{20,}',  # Токены в формате "token: xxx"
+            r'api[_-]?key\s*[:=]\s*[A-Za-z0-9]{20,}',  # API ключи в формате "api_key: xxx"
+            r'secret\s*[:=]\s*[A-Za-z0-9]{20,}',  # Секреты в формате "secret: xxx"
         ]
         
         for pattern in secret_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, temp_text, re.IGNORECASE):
                 logger.warning(f"Обнаружена потенциальная утечка в ответе LLM: {pattern}")
                 return False
-                
-        # Проверяем на наличие конфиденциальных данных из конфига
-        config = load_config()
-        sensitive_data = [
+        
+        # Проверяем на наличие НАСТОЯЩИХ конфиденциальных данных (не публичных)
+        truly_sensitive_data = [
             config.bot_token,
             config.yandex_api_key,
             config.webhook_secret,
-            SALON_CONFIG['contacts'],
         ]
         
-        for data in sensitive_data:
-            if data and data in text:
-                logger.warning("Обнаружена утечка конфиденциальных данных в ответе LLM")
+        for data in truly_sensitive_data:
+            if data and len(str(data)) > 10 and str(data) in text:
+                logger.warning("Обнаружена утечка НАСТОЯЩИХ конфиденциальных данных в ответе LLM")
                 return False
-                
+        
         return True
     
     async def cleanup_queues(self):
