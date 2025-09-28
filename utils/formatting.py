@@ -21,9 +21,9 @@ def escape_markdown_text(text: str) -> str:
         emoji_markers[marker] = emoji
         text = text.replace(emoji, marker, 1)
     
-    # Экранируем только действительно опасные символы для MarkdownV2
-    # НО оставляем переносы строк и некоторые другие символы
-    escape_chars = r'_[]()~`>+-=|{}!'
+    # Экранируем ВСЕ специальные символы MarkdownV2 (кроме уже обработанных)
+    # Это критически важно для Telegram
+    escape_chars = r'_[]()~`>#+-=|{}.!'
     text = re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
     
     # Возвращаем обратно форматирование

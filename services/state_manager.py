@@ -122,17 +122,45 @@ class UserStateManager:
             
             # Добавляем профессиональное завершение к ответам
             if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
-                reply += f"\n\n📞 Для записи на диагностику звоните: {escape_markdown_text(SALON_CONFIG['contacts'])}"
+                reply += f"\n\n📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
             
-            # Отправляем ответ с MarkdownV2
-            await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-            logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
+            # ВАЖНАЯ ПРОВЕРКА: Проверяем корректность MarkdownV2 перед отправкой
+            try:
+                # Пытаемся отправить тестовое сообщение для проверки
+                test_msg = await context.bot.send_message(
+                    chat_id, 
+                    "✍️ Печатаю ответ...", 
+                    parse_mode='MarkdownV2'
+                )
+                # Если тест прошел, удаляем тестовое сообщение
+                await context.bot.delete_message(chat_id, test_msg.message_id)
+                
+                # Отправляем основной ответ
+                await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
+                logger.info(f"Отправлен ответ пользователю {user_id}, длина: {len(reply)} символов")
+                
+            except Exception as parse_error:
+                logger.error(f"Ошибка парсинга MarkdownV2: {parse_error}")
+                # Отправляем без форматирования в случае ошибки
+                clean_reply = self.strip_markdown(reply)
+                await context.bot.send_message(chat_id, clean_reply)
+                logger.info(f"Отправлен ответ БЕЗ форматирования пользователю {user_id}")
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально
             pass
         except Exception as e:
             logger.error(f"Ошибка в process_user_messages: {e}")
+    
+    def strip_markdown(self, text):
+        """Удаляет все Markdown символы из текста"""
+        if not text:
+            return ""
+        # Удаляем все markdown символы
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Жирный текст
+        text = re.sub(r'\*([^*]+)\*', r'\1', text)      # Курсив
+        text = re.sub(r'\\([_\[\]()~`>#+=|{}.!-])', r'\1', text)  # Экранированные символы
+        return text
     
     def contains_banned_content(self, text):
         """Проверяет, содержит ли текст запрещенный контент"""
