@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 from services.yandex_gpt import YandexGPTClient
 from services.security import security
+from services.database import log_bot_response  # 🔥 НОВЫЙ ИМПОРТ
 from utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
 from utils.formatting import escape_markdown_text
 from models.config import SALON_CONFIG
@@ -132,11 +133,31 @@ class UserStateManager:
                 # Проверяем корректность MarkdownV2
                 if validate_markdown(reply):
                     await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
+                    
+                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
+                    asyncio.create_task(
+                        log_bot_response(
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            response_text=reply[:1000]  # Ограничиваем длину
+                        )
+                    )
+                    
                     logger.info(f"Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
                 else:
                     # Если валидация не прошла - отправляем без форматирования
                     clean_reply = self.strip_markdown(reply)
                     await context.bot.send_message(chat_id, clean_reply)
+                    
+                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
+                    asyncio.create_task(
+                        log_bot_response(
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            response_text=clean_reply[:1000]  # Ограничиваем длину
+                        )
+                    )
+                    
                     logger.info(f"Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
                     
             except Exception as parse_error:
@@ -145,11 +166,31 @@ class UserStateManager:
                 clean_reply = self.strip_markdown(reply)
                 try:
                     await context.bot.send_message(chat_id, clean_reply)
+                    
+                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
+                    asyncio.create_task(
+                        log_bot_response(
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            response_text=clean_reply[:1000]  # Ограничиваем длину
+                        )
+                    )
+                    
                     logger.info(f"Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
                 except Exception as final_error:
                     logger.error(f"Критическая ошибка отправки сообщения: {final_error}")
                     # Последняя попытка с минимальным сообщением
-                    await context.bot.send_message(chat_id, "Извините, произошла техническая ошибка. Попробуйте позже.")
+                    error_msg = "Извините, произошла техническая ошибка. Попробуйте позже."
+                    await context.bot.send_message(chat_id, error_msg)
+                    
+                    # 🔥 НОВОЕ: Логируем ошибку в базу данных
+                    asyncio.create_task(
+                        log_bot_response(
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            response_text=error_msg
+                        )
+                    )
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально
