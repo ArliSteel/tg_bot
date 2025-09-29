@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please email: your-email@example.com
+If you discover a security vulnerability, please email: atlisteel1213@yandex.ru
 
 Do NOT create a public GitHub issue.
 
