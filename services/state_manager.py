@@ -86,22 +86,25 @@ class UserStateManager:
             
             combined_text = " ".join(unique_messages)
             
-            # 🔥 ПРОСТОЙ ПОДХОД: считаем примерное количество тем
-            theme_count = self._count_simple_themes(combined_text)
+            # 🔥 ЖЕСТКИЙ КОНТРОЛЬ ТЕМ
+            missing_themes = self._check_missing_themes(combined_text)
             
-            if theme_count >= 3:
-                logger.info(f"Сложный запрос: {theme_count} тем")
-                # Для сложных запросов добавляем строгое требование
+            if missing_themes:
+                logger.info(f"Обнаружены пропущенные темы: {missing_themes}")
+                # Создаем промпт с явным указанием пропущенных тем
                 strict_prompt = f"""
-Клиент задал запрос с {theme_count} темами. Ты ОБЯЗАН ответить на КАЖДУЮ тему!
+КЛИЕНТ ЗАДАЛ ВОПРОСЫ ПО ЭТИМ ТЕМАМ. ТЫ ОБЯЗАН ОТВЕТИТЬ НА ВСЕ!
 
-Основные темы в запросе: {self._get_simple_themes_list(combined_text)}
+ОСНОВНЫЕ ТЕМЫ ЗАПРОСА:
+{self._get_detailed_themes_list(combined_text)}
 
-ПРАВИЛА ОТВЕТА:
-1. Ответь на ВСЕ темы по порядку
-2. Давай конкретные цены и сроки  
-3. Не пропускай ни одной темы
-4. Будь краток, но информативен
+В ПРЕДЫДУЩИХ ОТВЕТАХ ТЫ ПРОПУСКАЛ ЭТИ ТЕМЫ: {missing_themes}
+
+ПРАВИЛА:
+1. Ответь на КАЖДУЮ тему из списка выше
+2. Не пропускай НИ ОДНУ тему
+3. Используй точные цены из прайса
+4. Структурируй ответ четко по темам
 
 Запрос клиента: {combined_text}
 """
@@ -109,19 +112,20 @@ class UserStateManager:
             else:
                 reply = await YandexGPTClient.generate_response(combined_text)
             
-            # 🔥 ПРОВЕРКА: если ответ слишком короткий, пробуем еще раз
-            if theme_count >= 3 and len(reply) < 500:
-                logger.warning("Ответ слишком краткий, пробуем еще раз")
-                retry_prompt = f"""
-Предыдущий ответ был слишком коротким! Клиент ждет ответа на ВСЕ темы.
+            # 🔥 ФИНАЛЬНАЯ ПРОВЕРКА ПОЛНОТЫ
+            if missing_themes and self._check_still_missing(reply, combined_text):
+                logger.warning("❌ Все еще пропущены темы, финальная попытка")
+                final_prompt = f"""
+ФИНАЛЬНОЕ ПРЕДУПРЕЖДЕНИЕ: ты все еще пропускаешь темы!
 
-Темы которые нужно охватить: {self._get_simple_themes_list(combined_text)}
+Клиент ждет ответа на ВСЕ эти темы:
+{self._get_detailed_themes_list(combined_text)}
 
-Сделай развернутый ответ на каждую тему! Не пропускай ничего!
+Сделай полный ответ сейчас! Не пропускай ничего!
 
 Запрос: {combined_text}
 """
-                reply = await YandexGPTClient.generate_response(retry_prompt)
+                reply = await YandexGPTClient.generate_response(final_prompt)
             
             # Проверяем безопасность
             if not self.check_response_safety(reply):
@@ -158,7 +162,7 @@ class UserStateManager:
                 
                 if validate_markdown(reply):
                     await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-                    logger.info(f"✅ Ответ отправлен пользователю {user_id}")
+                    logger.info(f"✅ Полный ответ отправлен пользователю {user_id}")
                 else:
                     clean_reply = self.strip_markdown(reply)
                     await context.bot.send_message(chat_id, clean_reply)
@@ -185,37 +189,78 @@ class UserStateManager:
             except:
                 pass
     
-    def _count_simple_themes(self, text: str) -> int:
-        """Простой подсчет тем по ключевым словам"""
+    def _check_missing_themes(self, text: str) -> str:
+        """Проверяет, какие важные темы обычно пропускаются"""
         text_lower = text.lower()
-        themes = [
-            'полировка', 'покраск', 'керамик', 'фары', 'химчистк', 
-            'скидк', 'время', 'срок', 'гарантия', 'цена', 'стоимость',
-            'диагностик', 'запись', 'pdr', 'вмятины', 'скол'
-        ]
-        return sum(1 for theme in themes if theme in text_lower)
-    
-    def _get_simple_themes_list(self, text: str) -> str:
-        """Возвращает список тем для промпта"""
-        text_lower = text.lower()
-        theme_map = {
-            'полировка': 'виды полировки и цены',
-            'покраск': 'покраска и восстановление',
-            'керамик': 'керамическое покрытие', 
-            'фары': 'полировка фар',
+        commonly_missed = []
+        
+        # Темы которые часто пропускаются
+        critical_themes = {
+            'керамик': 'керамическое покрытие',
+            'фары': 'полировка фар', 
             'химчистк': 'химчистка салона',
-            'скидк': 'скидки и акции',
-            'время': 'сроки работ',
-            'гарантия': 'гарантия на работы',
-            'pdr': 'технология PDR'
+            'срок': 'сроки работ',
+            'время': 'время выполнения',
+            'скидк': 'скидки и акции'
         }
         
-        found = []
-        for theme, description in theme_map.items():
+        for theme, description in critical_themes.items():
             if theme in text_lower:
-                found.append(description)
+                commonly_missed.append(description)
         
-        return ", ".join(found) if found else "все вопросы клиента"
+        return ", ".join(commonly_missed) if commonly_missed else ""
+    
+    def _get_detailed_themes_list(self, text: str) -> str:
+        """Создает детальный список всех тем для промпта"""
+        text_lower = text.lower()
+        themes_found = []
+        
+        # Все возможные темы
+        all_themes = {
+            'полировка': '🚗 Полировка кузова (12 000 ₽)',
+            'покраск': '🔧 Покраска и восстановление',
+            'керамик': '💎 Керамическое покрытие (15 000 ₽)',
+            'фары': '💡 Полировка фар (2 500 ₽)',
+            'химчистк': '🧼 Химчистка салона (8 000 ₽)',
+            'pdr': '🛠️ Технология PDR',
+            'гарантия': '🛡️ Гарантия на работы',
+            'срок': '⏱ Сроки выполнения',
+            'время': '⏱ Время работ', 
+            'скидк': '💰 Скидки и акции',
+            'вин': '🎨 Подбор цвета по VIN',
+            'материал': '📦 Используемые материалы'
+        }
+        
+        for theme, description in all_themes.items():
+            if theme in text_lower:
+                themes_found.append(description)
+        
+        return "\n".join(themes_found) if themes_found else "Все вопросы клиента"
+    
+    def _check_still_missing(self, answer: str, question: str) -> bool:
+        """Проверяет, все ли темы охвачены в ответе"""
+        answer_lower = answer.lower()
+        question_lower = question.lower()
+        
+        # Критические темы которые должны быть в ответе
+        critical_in_question = []
+        if 'керамик' in question_lower:
+            critical_in_question.append('керамик')
+        if 'фары' in question_lower:
+            critical_in_question.append('фары') 
+        if 'химчистк' in question_lower:
+            critical_in_question.append('химчистк')
+        if 'срок' in question_lower or 'время' in question_lower:
+            critical_in_question.append('срок')
+        if 'скидк' in question_lower:
+            critical_in_question.append('скидк')
+        
+        # Проверяем есть ли они в ответе
+        for theme in critical_in_question:
+            if theme not in answer_lower:
+                return True
+        
+        return False
     
     def strip_markdown(self, text):
         if not text:
