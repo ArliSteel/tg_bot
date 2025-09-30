@@ -1,3 +1,4 @@
+# services/state_manager.py
 import asyncio
 import time
 import logging
@@ -97,8 +98,21 @@ class UserStateManager:
             
             combined_text = " ".join(unique_messages)
             
-            # Генерируем ответ
-            reply = await YandexGPTClient.generate_response(combined_text)
+            # 🔥 НОВОЕ: Определяем сложность запроса для адаптивного ответа
+            is_complex_query = self._is_complex_query(combined_text)
+            
+            if is_complex_query:
+                logger.info(f"Сложный запрос от пользователя {user_id}: {len(combined_text)} символов, {self._count_themes(combined_text)} тем")
+                # Добавляем контекст для человекоподобного ответа
+                user_message_with_context = (
+                    f"Клиент задал несколько вопросов одним сообщением. "
+                    f"Ответь как живой секретарь - затронь основные темы, "
+                    f"не перегружай деталями, пригласи на диагностику для уточнения. "
+                    f"Вопрос клиента: {combined_text}"
+                )
+                reply = await YandexGPTClient.generate_response(user_message_with_context)
+            else:
+                reply = await YandexGPTClient.generate_response(combined_text)
             
             # Проверяем безопасность ответа
             if not self.check_response_safety(reply):
@@ -127,9 +141,9 @@ class UserStateManager:
             if self.contains_banned_content(reply):
                 reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
             
-            # Добавляем профессиональное завершение к ответам
-            if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
-                reply += f"\n\n📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
+            # Добавляем профессиональное завершение к ответам, если его нет
+            if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес", "диагностик"]):
+                reply += f"\n\n📞 Для уточнения деталей звоните: {SALON_CONFIG['contacts']}"
             
             # Пробуем отправить с MarkdownV2
             try:
@@ -221,6 +235,24 @@ class UserStateManager:
                 await context.bot.send_message(chat_id, error_msg)
             except:
                 pass
+    
+    def _is_complex_query(self, text: str) -> bool:
+        """Определяет, является ли запрос сложным (много вопросов или тем)"""
+        if len(text) > 500:
+            return True
+        
+        theme_count = self._count_themes(text)
+        return theme_count >= 3
+    
+    def _count_themes(self, text: str) -> int:
+        """Считает количество затронутых тем в запросе"""
+        themes = [
+            'полировка', 'покраск', 'керамик', 'фары', 'химчистк', 
+            'скидк', 'время', 'срок', 'гарантия', 'цена', 'стоимость',
+            'диагностик', 'запись', 'pdr', 'вмятины', 'скол', 'царапин'
+        ]
+        text_lower = text.lower()
+        return sum(1 for theme in themes if theme in text_lower)
     
     def strip_markdown(self, text):
         """Удаляет все Markdown символы из текста"""
