@@ -1,4 +1,3 @@
-# services/state_manager.py
 import asyncio
 import time
 import logging
@@ -6,7 +5,7 @@ import re
 from collections import defaultdict
 from services.yandex_gpt import YandexGPTClient
 from services.security import security
-from services.database import log_bot_response
+# from services.database import log_bot_response  # 🔥 ЗАКОММЕНТИРОВАЛИ - временно отключаем БД
 from utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
 from utils.formatting import escape_markdown_text
 from models.config import SALON_CONFIG
@@ -154,17 +153,17 @@ class UserStateManager:
                 if validate_markdown(reply):
                     await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
                     
-                    # Логируем ответ бота в базу данных
-                    try:
-                        asyncio.create_task(
-                            log_bot_response(
-                                user_id=user_id,
-                                chat_id=chat_id,
-                                response_text=reply[:1000]  # Ограничиваем длину
-                            )
-                        )
-                    except Exception as db_error:
-                        logger.error(f"Ошибка логирования в БД: {db_error}")
+                    # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логирование ответа бота в базу данных
+                    # try:
+                    #     asyncio.create_task(
+                    #         log_bot_response(
+                    #             user_id=user_id,
+                    #             chat_id=chat_id,
+                    #             response_text=reply[:1000]
+                    #         )
+                    #     )
+                    # except Exception as db_error:
+                    #     logger.error(f"Ошибка логирования в БД: {db_error}")
                     
                     logger.info(f"✅ Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
                 else:
@@ -172,17 +171,17 @@ class UserStateManager:
                     clean_reply = self.strip_markdown(reply)
                     await context.bot.send_message(chat_id, clean_reply)
                     
-                    # Логируем ответ бота в базу данных
-                    try:
-                        asyncio.create_task(
-                            log_bot_response(
-                                user_id=user_id,
-                                chat_id=chat_id,
-                                response_text=clean_reply[:1000]  # Ограничиваем длину
-                            )
-                        )
-                    except Exception as db_error:
-                        logger.error(f"Ошибка логирования в БД: {db_error}")
+                    # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логирование ответа бота в базу данных
+                    # try:
+                    #     asyncio.create_task(
+                    #         log_bot_response(
+                    #             user_id=user_id,
+                    #             chat_id=chat_id,
+                    #             response_text=clean_reply[:1000]
+                    #         )
+                    #     )
+                    # except Exception as db_error:
+                    #     logger.error(f"Ошибка логирования в БД: {db_error}")
                     
                     logger.info(f"⚠️ Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
                     
@@ -193,17 +192,17 @@ class UserStateManager:
                 try:
                     await context.bot.send_message(chat_id, clean_reply)
                     
-                    # Логируем ответ бота в базу данных
-                    try:
-                        asyncio.create_task(
-                            log_bot_response(
-                                user_id=user_id,
-                                chat_id=chat_id,
-                                response_text=clean_reply[:1000]  # Ограничиваем длину
-                            )
-                        )
-                    except Exception as db_error:
-                        logger.error(f"Ошибка логирования в БД: {db_error}")
+                    # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логирование ответа бота в базу данных
+                    # try:
+                    #     asyncio.create_task(
+                    #         log_bot_response(
+                    #             user_id=user_id,
+                    #             chat_id=chat_id,
+                    #             response_text=clean_reply[:1000]
+                    #         )
+                    #     )
+                    # except Exception as db_error:
+                    #     logger.error(f"Ошибка логирования в БД: {db_error}")
                     
                     logger.info(f"✅ Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
                 except Exception as final_error:
@@ -212,17 +211,17 @@ class UserStateManager:
                     error_msg = "Извините, произошла техническая ошибка. Попробуйте позже."
                     await context.bot.send_message(chat_id, error_msg)
                     
-                    # Логируем ошибку в базу данных
-                    try:
-                        asyncio.create_task(
-                            log_bot_response(
-                                user_id=user_id,
-                                chat_id=chat_id,
-                                response_text=error_msg
-                            )
-                        )
-                    except Exception as db_error:
-                        logger.error(f"Ошибка логирования в БД: {db_error}")
+                    # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логирование ошибки в базу данных
+                    # try:
+                    #     asyncio.create_task(
+                    #         log_bot_response(
+                    #             user_id=user_id,
+                    #             chat_id=chat_id,
+                    #             response_text=error_msg
+                    #         )
+                    #     )
+                    # except Exception as db_error:
+                    #     logger.error(f"Ошибка логирования в БД: {db_error}")
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально

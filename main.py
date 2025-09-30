@@ -12,7 +12,7 @@ from handlers.faq import register_faq_handlers
 from handlers.messages import register_message_handlers
 from services.state_manager import user_state
 from services.security import security
-from services.database import init_database  # 🔥 НОВЫЙ ИМПОРТ
+# from services.database import init_database  # 🔥 ЗАКОММЕНТИРОВАЛИ - временно отключаем БД
 from utils.logging import setup_logging
 
 # Настройка логирования
@@ -70,9 +70,10 @@ async def handle_debug(request):
         "TELEGRAM_TOKEN_set": bool(os.getenv("TELEGRAM_TOKEN")),
         "YANDEX_API_KEY_set": bool(os.getenv("YANDEX_API_KEY")),
         "YANDEX_FOLDER_ID_set": bool(os.getenv("YANDEX_FOLDER_ID")),
-        "DATABASE_URL_set": bool(os.getenv("DATABASE_URL")),  # 🔥 НОВОЕ: проверка БД
+        "DATABASE_URL_set": bool(os.getenv("DATABASE_URL")),
         "WEBHOOK_URL": os.getenv("WEBHOOK_URL"),
         "WEBHOOK_SECRET_set": bool(os.getenv("WEBHOOK_SECRET")),
+        "database_initialized": False,  # 🔥 ОТКЛЮЧЕНО
         "status": "healthy"
     }
     return web.json_response(debug_info)
@@ -93,10 +94,11 @@ async def initialize_bot():
         register_faq_handlers(bot_app)
         register_message_handlers(bot_app)
         
-        # 🔥 НОВОЕ: Инициализация базы данных
-        logger.info("Инициализация базы данных...")
-        await init_database()
-        logger.info("✅ База данных успешно инициализирована")
+        # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Инициализация базы данных
+        # logger.info("Инициализация базы данных...")
+        # await init_database()
+        # logger.info("✅ База данных успешно инициализирована")
+        logger.info("⚠️ База данных временно отключена")
         
         # Запускаем очистку очередей
         asyncio.create_task(user_state.cleanup_queues())
@@ -130,7 +132,7 @@ async def init_app():
 
 def main():
     """Основная функция запуска"""
-    logger.info("🚀 Запуск бота с YandexGPT и PostgreSQL...")  # 🔥 ОБНОВЛЕНО: добавили PostgreSQL
+    logger.info("🚀 Запуск бота с YandexGPT (база данных временно отключена)...")
     
     try:
         # Настройка event loop для совместимости
