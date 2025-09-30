@@ -23,21 +23,17 @@ class UserStateManager:
     async def add_and_process_message(self, user_id, chat_id, context, message):
         """Добавляет сообщение в очередь и запускает обработку"""
         async with self.processing_lock:
-            # Инициализируем очередь для пользователя, если нужно
             if user_id not in self.user_message_queues:
                 self.user_message_queues[user_id] = []
             
-            # Добавляем сообщение в очередь
             self.user_message_queues[user_id].append(message)
             
-            # Если уже есть задача обработки, отменяем ее
             if user_id in self.user_processing_tasks:
                 try:
                     self.user_processing_tasks[user_id].cancel()
                 except:
                     pass
             
-            # Создаем новую задачу обработки
             self.user_processing_tasks[user_id] = asyncio.create_task(
                 self.process_user_messages(user_id, chat_id, context)
             )
@@ -45,27 +41,23 @@ class UserStateManager:
     async def process_user_messages(self, user_id, chat_id, context):
         """Обрабатывает все сообщения пользователя за раз"""
         try:
-            # Ждем 1 секунду для получения возможных дополнительных сообщений
             await asyncio.sleep(1.0)
             
             async with self.processing_lock:
                 if user_id not in self.user_message_queues or not self.user_message_queues[user_id]:
                     return
                 
-                # Получаем все сообщения из очереди
                 messages = self.user_message_queues[user_id].copy()
                 self.user_message_queues[user_id] = []
                 
-                # Удаляем задачу обработки
                 if user_id in self.user_processing_tasks:
                     del self.user_processing_tasks[user_id]
             
-            # Проверяем лимиты без добавления запросов
+            # Проверяем лимиты
             current_count = security.get_current_request_count(user_id)
             max_requests = security.config['USER_RATE_LIMIT']
             
             if current_count + len(messages) > max_requests:
-                # Превышение лимита - добавляем предупреждение
                 warning_exceeded = security.add_warning(user_id, "RATE_LIMIT_EXCEEDED")
                 
                 if warning_exceeded:
@@ -79,16 +71,14 @@ class UserStateManager:
                         f"⚠️ Слишком много сообщений. Предупреждение {warning_count}/{max_warnings}."
                     )
                 
-                # Добавляем запросы в историю (по одному на каждое сообщение)
                 for _ in range(len(messages)):
                     security.user_activity[user_id].append(time.time())
                 return
             
-            # Добавляем запросы в историю (по одному на каждое сообщение)
             for _ in range(len(messages)):
                 security.user_activity[user_id].append(time.time())
             
-            # Объединяем сообщения в один текст (исключаем дубликаты)
+            # Объединяем сообщения
             unique_messages = []
             for msg in messages:
                 if msg not in unique_messages:
@@ -96,133 +86,232 @@ class UserStateManager:
             
             combined_text = " ".join(unique_messages)
             
-            # Генерируем ответ
-            reply = await YandexGPTClient.generate_response(combined_text)
+            # 🔥 ЖЕСТКИЙ КОНТРОЛЬ ТЕМ
+            missing_themes = self._check_missing_themes(combined_text)
             
-            # Проверяем безопасность ответа
+            if missing_themes:
+                logger.info(f"Обнаружены пропущенные темы: {missing_themes}")
+                # Создаем промпт с явным указанием пропущенных тем
+                strict_prompt = f"""
+КЛИЕНТ ЗАДАЛ ВОПРОСЫ ПО ЭТИМ ТЕМАМ. ТЫ ОБЯЗАН ОТВЕТИТЬ НА ВСЕ!
+
+ОСНОВНЫЕ ТЕМЫ ЗАПРОСА:
+{self._get_detailed_themes_list(combined_text)}
+
+В ПРЕДЫДУЩИХ ОТВЕТАХ ТЫ ПРОПУСКАЛ ЭТИ ТЕМЫ: {missing_themes}
+
+ПРАВИЛА:
+1. Ответь на КАЖДУЮ тему из списка выше
+2. Не пропускай НИ ОДНУ тему
+3. Используй точные цены из прайса
+4. Структурируй ответ четко по темам
+
+Запрос клиента: {combined_text}
+"""
+                reply = await YandexGPTClient.generate_response(strict_prompt)
+            else:
+                reply = await YandexGPTClient.generate_response(combined_text)
+            
+            # 🔥 ФИНАЛЬНАЯ ПРОВЕРКА ПОЛНОТЫ
+            if missing_themes and self._check_still_missing(reply, combined_text):
+                logger.warning("❌ Все еще пропущены темы, финальная попытка")
+                final_prompt = f"""
+ФИНАЛЬНОЕ ПРЕДУПРЕЖДЕНИЕ: ты все еще пропускаешь темы!
+
+Клиент ждет ответа на ВСЕ эти темы:
+{self._get_detailed_themes_list(combined_text)}
+
+Сделай полный ответ сейчас! Не пропускай ничего!
+
+Запрос: {combined_text}
+"""
+                reply = await YandexGPTClient.generate_response(final_prompt)
+            
+            # Проверяем безопасность
             if not self.check_response_safety(reply):
-                logger.warning(f"Ответ LLM содержит потенциально опасный контент: {reply[:100]}...")
+                logger.warning("Небезопасный ответ LLM")
                 reply = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте другой вопрос."
             
-            # Ограничиваем длину ответа
-            if len(reply) > 4000:  # MAX_TEXT_LENGTH из конфига
+            # Ограничиваем длину
+            if len(reply) > 4000:
                 reply = reply[:4000] + "..."
             
-            # Симуляция человеческого печатания
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            typing_time = await simulate_typing_with_errors(chat_id, context, reply)
-            logger.info(f"Симуляция печатания заняла {typing_time:.2f} секунд")
+            # СИМУЛЯЦИЯ ПЕЧАТАНИЯ
+            try:
+                typing_time = await simulate_typing_with_errors(chat_id, context, reply)
+                logger.info(f"Печатание: {typing_time:.2f} сек")
+            except Exception as e:
+                logger.error(f"Ошибка симуляции: {e}")
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                await asyncio.sleep(2)
             
-            # Добавляем случайные опечатки для естественности
+            # Добавляем опечатки
             reply = await simulate_human_typing_mistakes(reply)
             
-            # Фильтрация нежелательных фраз
+            # Фильтрация
             if self.contains_banned_content(reply):
                 reply = "🚫 Этот вопрос требует консультации специалиста. Пожалуйста, обратитесь к администратору по телефону."
             
-            # Добавляем профессиональное завершение к ответам
-            if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес"]):
-                reply += f"\n\n📞 Для записи на диагностику звоните: {SALON_CONFIG['contacts']}"
+            # Добавляем контакты если их нет
+            if not any(phrase in reply.lower() for phrase in ["звоните", "телефон", "контакт", "адрес", "диагностик"]):
+                reply += f"\n\n📞 Для уточнения деталей звоните: {SALON_CONFIG['contacts']}"
             
-            # Пробуем отправить с MarkdownV2
+            # Отправляем сообщение
             try:
-                # Импортируем функцию валидации
                 from utils.formatting import validate_markdown
                 
-                # Проверяем корректность MarkdownV2
                 if validate_markdown(reply):
                     await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
-                    logger.info(f"Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
+                    logger.info(f"✅ Полный ответ отправлен пользователю {user_id}")
                 else:
-                    # Если валидация не прошла - отправляем без форматирования
                     clean_reply = self.strip_markdown(reply)
                     await context.bot.send_message(chat_id, clean_reply)
-                    logger.info(f"Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
+                    logger.info(f"⚠️ Ответ без форматирования пользователю {user_id}")
                     
             except Exception as parse_error:
-                logger.warning(f"Ошибка отправки с MarkdownV2: {parse_error}")
-                # Отправляем без форматирования
+                logger.warning(f"Ошибка Markdown: {parse_error}")
                 clean_reply = self.strip_markdown(reply)
                 try:
                     await context.bot.send_message(chat_id, clean_reply)
-                    logger.info(f"Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
+                    logger.info(f"✅ Запасной ответ пользователю {user_id}")
                 except Exception as final_error:
-                    logger.error(f"Критическая ошибка отправки сообщения: {final_error}")
-                    # Последняя попытка с минимальным сообщением
-                    await context.bot.send_message(chat_id, "Извините, произошла техническая ошибка. Попробуйте позже.")
+                    logger.error(f"❌ Критическая ошибка: {final_error}")
+                    error_msg = "Извините, произошла техническая ошибка. Попробуйте позже."
+                    await context.bot.send_message(chat_id, error_msg)
             
         except asyncio.CancelledError:
-            # Задача была отменена, это нормально
-            pass
+            logger.info(f"Задача отменена для пользователя {user_id}")
         except Exception as e:
-            logger.error(f"Ошибка в process_user_messages: {e}")
+            logger.error(f"❌ Ошибка: {e}")
+            try:
+                error_msg = "⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
+                await context.bot.send_message(chat_id, error_msg)
+            except:
+                pass
+    
+    def _check_missing_themes(self, text: str) -> str:
+        """Проверяет, какие важные темы обычно пропускаются"""
+        text_lower = text.lower()
+        commonly_missed = []
+        
+        # Темы которые часто пропускаются
+        critical_themes = {
+            'керамик': 'керамическое покрытие',
+            'фары': 'полировка фар', 
+            'химчистк': 'химчистка салона',
+            'срок': 'сроки работ',
+            'время': 'время выполнения',
+            'скидк': 'скидки и акции'
+        }
+        
+        for theme, description in critical_themes.items():
+            if theme in text_lower:
+                commonly_missed.append(description)
+        
+        return ", ".join(commonly_missed) if commonly_missed else ""
+    
+    def _get_detailed_themes_list(self, text: str) -> str:
+        """Создает детальный список всех тем для промпта"""
+        text_lower = text.lower()
+        themes_found = []
+        
+        # Все возможные темы
+        all_themes = {
+            'полировка': '🚗 Полировка кузова (12 000 ₽)',
+            'покраск': '🔧 Покраска и восстановление',
+            'керамик': '💎 Керамическое покрытие (15 000 ₽)',
+            'фары': '💡 Полировка фар (2 500 ₽)',
+            'химчистк': '🧼 Химчистка салона (8 000 ₽)',
+            'pdr': '🛠️ Технология PDR',
+            'гарантия': '🛡️ Гарантия на работы',
+            'срок': '⏱ Сроки выполнения',
+            'время': '⏱ Время работ', 
+            'скидк': '💰 Скидки и акции',
+            'вин': '🎨 Подбор цвета по VIN',
+            'материал': '📦 Используемые материалы'
+        }
+        
+        for theme, description in all_themes.items():
+            if theme in text_lower:
+                themes_found.append(description)
+        
+        return "\n".join(themes_found) if themes_found else "Все вопросы клиента"
+    
+    def _check_still_missing(self, answer: str, question: str) -> bool:
+        """Проверяет, все ли темы охвачены в ответе"""
+        answer_lower = answer.lower()
+        question_lower = question.lower()
+        
+        # Критические темы которые должны быть в ответе
+        critical_in_question = []
+        if 'керамик' in question_lower:
+            critical_in_question.append('керамик')
+        if 'фары' in question_lower:
+            critical_in_question.append('фары') 
+        if 'химчистк' in question_lower:
+            critical_in_question.append('химчистк')
+        if 'срок' in question_lower or 'время' in question_lower:
+            critical_in_question.append('срок')
+        if 'скидк' in question_lower:
+            critical_in_question.append('скидк')
+        
+        # Проверяем есть ли они в ответе
+        for theme in critical_in_question:
+            if theme not in answer_lower:
+                return True
+        
+        return False
     
     def strip_markdown(self, text):
-        """Удаляет все Markdown символы из текста"""
         if not text:
             return ""
-        # Удаляем все markdown символы
-        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Жирный текст
-        text = re.sub(r'\*([^*]+)\*', r'\1', text)      # Курсив
-        # Убираем экранированные символы
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+        text = re.sub(r'\*([^*]+)\*', r'\1', text)
         text = re.sub(r'\\([_\[\]()~`>#+=|{}.!-])', r'\1', text)
         return text
     
     def contains_banned_content(self, text):
-        """Проверяет, содержит ли текст запрещенный контент"""
+        if not text:
+            return False
         text_lower = text.lower()
         medical_phrases = ["лечебн", "медицинск", "вылеч"]
         legal_phrases = ["юридическ", "адвокат", "суд"]
 
-        # Проверяем медицинские фразы в неподходящем контексте
         if any(phrase in text_lower for phrase in medical_phrases) and "авто" not in text_lower:
             return True
-            
-        # Проверяем юридические фразы
         if any(phrase in text_lower for phrase in legal_phrases):
             return True
-            
         return False
     
     def check_response_safety(self, text):
-        """Проверяет ответ LLM на утечку конфиденциальной информации"""
         if not text:
             return True
         
-        # Убираем из проверки публичную информацию, которая должна быть в ответах
         config = load_config()
-        
-        # Список публичной информации, которая РАЗРЕШЕНА в ответах
         allowed_public_info = [
-            SALON_CONFIG['contacts'],  # Публичный номер телефона
-            SALON_CONFIG['address'],   # Публичный адрес
-            SALON_CONFIG['name'],      # Название компании
-            config.webhook_url if config.webhook_url else "",  # URL вебхука (если публичный)
+            SALON_CONFIG['contacts'],
+            SALON_CONFIG['address'], 
+            SALON_CONFIG['name'],
+            config.webhook_url if config.webhook_url else "",
         ]
         
-        # Создаем временную копию текста без разрешенной публичной информации
         temp_text = text
         for allowed_info in allowed_public_info:
             if allowed_info:
                 temp_text = temp_text.replace(str(allowed_info), "")
         
-        # Проверяем на утечку РЕАЛЬНЫХ секретов (но не публичной информации)
         secret_patterns = [
-            r'[A-Za-z0-9]{40,}',       # Очень длинные строки (токены/ключи)
-            r'sk-[A-Za-z0-9]{20,}',    # API ключи OpenAI
-            r'AKIA[0-9A-Z]{16}',       # AWS ключи
-            r'password\s*[:=]\s*\S+',  # Пароли в формате "password: xxx"
-            r'token\s*[:=]\s*[A-Za-z0-9]{20,}',  # Токены в формате "token: xxx"
-            r'api[_-]?key\s*[:=]\s*[A-Za-z0-9]{20,}',  # API ключи в формате "api_key: xxx"
-            r'secret\s*[:=]\s*[A-Za-z0-9]{20,}',  # Секреты в формате "secret: xxx"
+            r'[A-Za-z0-9]{40,}',
+            r'sk-[A-Za-z0-9]{20,}',
+            r'AKIA[0-9A-Z]{16}',
+            r'password\s*[:=]\s*\S+',
+            r'token\s*[:=]\s*[A-Za-z0-9]{20,}',
         ]
         
         for pattern in secret_patterns:
             if re.search(pattern, temp_text, re.IGNORECASE):
-                logger.warning(f"Обнаружена потенциальная утечка в ответе LLM: {pattern}")
                 return False
         
-        # Проверяем на наличие НАСТОЯЩИХ конфиденциальных данных (не публичных)
         truly_sensitive_data = [
             config.bot_token,
             config.yandex_api_key,
@@ -231,25 +320,27 @@ class UserStateManager:
         
         for data in truly_sensitive_data:
             if data and len(str(data)) > 10 and str(data) in text:
-                logger.warning("Обнаружена утечка НАСТОЯЩИХ конфиденциальных данных в ответе LLM")
                 return False
         
         return True
     
     async def cleanup_queues(self):
-        """Очищает старые очереди сообщений"""
         while True:
-            await asyncio.sleep(300)  # Каждые 5 минут
+            await asyncio.sleep(300)
             current_time = time.time()
             async with self.processing_lock:
-                for user_id in list(self.user_message_queues.keys()):
-                    # Если очередь пуста более 10 минут, удаляем ее
+                users_to_remove = []
+                for user_id in self.user_message_queues:
                     if not self.user_message_queues[user_id]:
-                        del self.user_message_queues[user_id]
-                for user_id in list(self.user_processing_tasks.keys()):
-                    # Если задача завершена, удаляем ее
+                        users_to_remove.append(user_id)
+                for user_id in users_to_remove:
+                    del self.user_message_queues[user_id]
+                
+                tasks_to_remove = []
+                for user_id in self.user_processing_tasks:
                     if self.user_processing_tasks[user_id].done():
-                        del self.user_processing_tasks[user_id]
+                        tasks_to_remove.append(user_id)
+                for user_id in tasks_to_remove:
+                    del self.user_processing_tasks[user_id]
 
-# Глобальный экземпляр менеджера состояния
 user_state = UserStateManager()

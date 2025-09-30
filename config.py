@@ -18,6 +18,11 @@ class Settings:
         self.max_text_length = int(os.getenv("MAX_TEXT_LENGTH", "1000"))
         self.block_duration = int(os.getenv("BLOCK_DURATION", "600"))
         self.warning_threshold = int(os.getenv("WARNING_THRESHOLD", "2"))
+                # Database
+        self.database_url = os.getenv(
+            "DATABASE_URL", 
+            "postgresql+asyncpg://bot_user:bot_password@localhost:5432/telegram_bot"
+        )
 
 def load_config():
     """Загрузка и проверка конфигурации"""

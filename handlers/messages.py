@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes, MessageHandler, filters
 from models.config import SALON_CONFIG
 from services.security import secure_handler
 from services.state_manager import user_state
+# from services.database import log_user_message  # 🔥 ЗАКОММЕНТИРОВАЛИ - временно отключаем БД
 from utils.formatting import escape_markdown_text
 
 logger = logging.getLogger(__name__)
@@ -14,14 +15,32 @@ logger = logging.getLogger(__name__)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
+        # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логируем сообщение пользователя в базу данных
+        # user = update.effective_user
+        # chat = update.effective_chat
+        # user_text = update.message.text
+        # 
+        # # Логируем в фоне, не блокируя основной поток
+        # asyncio.create_task(
+        #     log_user_message(
+        #         user_id=user.id,
+        #         username=user.username,
+        #         chat_id=chat.id,
+        #         message_text=user_text[:1000]
+        #     )
+        # )
+        
+        user = update.effective_user
+        user_text = update.message.text
+        
         # Пропускаем команды меню
-        user_text = update.message.text.lower()
-        if user_text in ['меню', 'start', 'начать', 'faq', 'вопросы']:
+        user_text_lower = user_text.lower()
+        if user_text_lower in ['меню', 'start', 'начать', 'faq', 'вопросы']:
             from handlers.base import start
             await start(update, context)
             return
             
-        user_id = update.effective_user.id
+        user_id = user.id
         chat_id = update.effective_chat.id
         
         # Добавляем сообщение в очередь и обрабатываем
@@ -46,6 +65,18 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
         logger.info(f"User {user_id}: media - User sent media file")
+        
+        # 🔥 ВРЕМЕННО ОТКЛЮЧЕНО: Логируем медиа-сообщение
+        # user = update.effective_user
+        # chat = update.effective_chat
+        # asyncio.create_task(
+        #     log_user_message(
+        #         user_id=user.id,
+        #         username=user.username,
+        #         chat_id=chat.id,
+        #         message_text="[MEDIA_FILE]"
+        #     )
+        # )
         
         error_msg = escape_markdown_text(
             "📎 Я обрабатываю только текстовые сообщения. "
