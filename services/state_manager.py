@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from services.yandex_gpt import YandexGPTClient
 from services.security import security
-from services.database import log_bot_response  # 🔥 НОВЫЙ ИМПОРТ
+from services.database import log_bot_response
 from utils.simulation import simulate_typing_with_errors, simulate_human_typing_mistakes
 from utils.formatting import escape_markdown_text
 from models.config import SALON_CONFIG
@@ -109,10 +109,16 @@ class UserStateManager:
             if len(reply) > 4000:  # MAX_TEXT_LENGTH из конфига
                 reply = reply[:4000] + "..."
             
-            # Симуляция человеческого печатания
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            typing_time = await simulate_typing_with_errors(chat_id, context, reply)
-            logger.info(f"Симуляция печатания заняла {typing_time:.2f} секунд")
+            # 🔥 УЛУЧШЕННАЯ СИМУЛЯЦИЯ ПЕЧАТАНИЯ
+            try:
+                # Новая реалистичная симуляция печатания
+                typing_time = await simulate_typing_with_errors(chat_id, context, reply)
+                logger.info(f"✅ Реалистичная симуляция печатания заняла {typing_time:.2f} секунд для {len(reply)} символов")
+            except Exception as e:
+                logger.error(f"Ошибка симуляции печатания: {e}")
+                # Фолбэк: простая задержка
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                await asyncio.sleep(2)
             
             # Добавляем случайные опечатки для естественности
             reply = await simulate_human_typing_mistakes(reply)
@@ -134,31 +140,37 @@ class UserStateManager:
                 if validate_markdown(reply):
                     await context.bot.send_message(chat_id, reply, parse_mode='MarkdownV2')
                     
-                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
-                    asyncio.create_task(
-                        log_bot_response(
-                            user_id=user_id,
-                            chat_id=chat_id,
-                            response_text=reply[:1000]  # Ограничиваем длину
+                    # Логируем ответ бота в базу данных
+                    try:
+                        asyncio.create_task(
+                            log_bot_response(
+                                user_id=user_id,
+                                chat_id=chat_id,
+                                response_text=reply[:1000]  # Ограничиваем длину
+                            )
                         )
-                    )
+                    except Exception as db_error:
+                        logger.error(f"Ошибка логирования в БД: {db_error}")
                     
-                    logger.info(f"Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
+                    logger.info(f"✅ Отправлен ответ с MarkdownV2 пользователю {user_id}, длина: {len(reply)} символов")
                 else:
                     # Если валидация не прошла - отправляем без форматирования
                     clean_reply = self.strip_markdown(reply)
                     await context.bot.send_message(chat_id, clean_reply)
                     
-                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
-                    asyncio.create_task(
-                        log_bot_response(
-                            user_id=user_id,
-                            chat_id=chat_id,
-                            response_text=clean_reply[:1000]  # Ограничиваем длину
+                    # Логируем ответ бота в базу данных
+                    try:
+                        asyncio.create_task(
+                            log_bot_response(
+                                user_id=user_id,
+                                chat_id=chat_id,
+                                response_text=clean_reply[:1000]  # Ограничиваем длину
+                            )
                         )
-                    )
+                    except Exception as db_error:
+                        logger.error(f"Ошибка логирования в БД: {db_error}")
                     
-                    logger.info(f"Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
+                    logger.info(f"⚠️ Отправлен ответ БЕЗ форматирования (валидация не прошла) пользователю {user_id}")
                     
             except Exception as parse_error:
                 logger.warning(f"Ошибка отправки с MarkdownV2: {parse_error}")
@@ -167,36 +179,48 @@ class UserStateManager:
                 try:
                     await context.bot.send_message(chat_id, clean_reply)
                     
-                    # 🔥 НОВОЕ: Логируем ответ бота в базу данных
-                    asyncio.create_task(
-                        log_bot_response(
-                            user_id=user_id,
-                            chat_id=chat_id,
-                            response_text=clean_reply[:1000]  # Ограничиваем длину
+                    # Логируем ответ бота в базу данных
+                    try:
+                        asyncio.create_task(
+                            log_bot_response(
+                                user_id=user_id,
+                                chat_id=chat_id,
+                                response_text=clean_reply[:1000]  # Ограничиваем длину
+                            )
                         )
-                    )
+                    except Exception as db_error:
+                        logger.error(f"Ошибка логирования в БД: {db_error}")
                     
-                    logger.info(f"Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
+                    logger.info(f"✅ Отправлен запасной ответ БЕЗ форматирования пользователю {user_id}")
                 except Exception as final_error:
-                    logger.error(f"Критическая ошибка отправки сообщения: {final_error}")
+                    logger.error(f"❌ Критическая ошибка отправки сообщения: {final_error}")
                     # Последняя попытка с минимальным сообщением
                     error_msg = "Извините, произошла техническая ошибка. Попробуйте позже."
                     await context.bot.send_message(chat_id, error_msg)
                     
-                    # 🔥 НОВОЕ: Логируем ошибку в базу данных
-                    asyncio.create_task(
-                        log_bot_response(
-                            user_id=user_id,
-                            chat_id=chat_id,
-                            response_text=error_msg
+                    # Логируем ошибку в базу данных
+                    try:
+                        asyncio.create_task(
+                            log_bot_response(
+                                user_id=user_id,
+                                chat_id=chat_id,
+                                response_text=error_msg
+                            )
                         )
-                    )
+                    except Exception as db_error:
+                        logger.error(f"Ошибка логирования в БД: {db_error}")
             
         except asyncio.CancelledError:
             # Задача была отменена, это нормально
-            pass
+            logger.info(f"Задача обработки сообщений пользователя {user_id} отменена")
         except Exception as e:
-            logger.error(f"Ошибка в process_user_messages: {e}")
+            logger.error(f"❌ Ошибка в process_user_messages: {e}")
+            try:
+                # Пытаемся отправить сообщение об ошибке
+                error_msg = "⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
+                await context.bot.send_message(chat_id, error_msg)
+            except:
+                pass
     
     def strip_markdown(self, text):
         """Удаляет все Markdown символы из текста"""
@@ -211,6 +235,9 @@ class UserStateManager:
     
     def contains_banned_content(self, text):
         """Проверяет, содержит ли текст запрещенный контент"""
+        if not text:
+            return False
+            
         text_lower = text.lower()
         medical_phrases = ["лечебн", "медицинск", "вылеч"]
         legal_phrases = ["юридическ", "адвокат", "суд"]
@@ -260,7 +287,7 @@ class UserStateManager:
         
         for pattern in secret_patterns:
             if re.search(pattern, temp_text, re.IGNORECASE):
-                logger.warning(f"Обнаружена потенциальная утечка в ответе LLM: {pattern}")
+                logger.warning(f"⚠️ Обнаружена потенциальная утечка в ответе LLM: {pattern}")
                 return False
         
         # Проверяем на наличие НАСТОЯЩИХ конфиденциальных данных (не публичных)
@@ -272,7 +299,7 @@ class UserStateManager:
         
         for data in truly_sensitive_data:
             if data and len(str(data)) > 10 and str(data) in text:
-                logger.warning("Обнаружена утечка НАСТОЯЩИХ конфиденциальных данных в ответе LLM")
+                logger.warning("❌ Обнаружена утечка НАСТОЯЩИХ конфиденциальных данных в ответе LLM")
                 return False
         
         return True
@@ -283,14 +310,25 @@ class UserStateManager:
             await asyncio.sleep(300)  # Каждые 5 минут
             current_time = time.time()
             async with self.processing_lock:
-                for user_id in list(self.user_message_queues.keys()):
-                    # Если очередь пуста более 10 минут, удаляем ее
+                # Очищаем пустые очереди
+                users_to_remove = []
+                for user_id in self.user_message_queues:
                     if not self.user_message_queues[user_id]:
-                        del self.user_message_queues[user_id]
-                for user_id in list(self.user_processing_tasks.keys()):
-                    # Если задача завершена, удаляем ее
+                        users_to_remove.append(user_id)
+                
+                for user_id in users_to_remove:
+                    del self.user_message_queues[user_id]
+                    logger.debug(f"Очищена пустая очередь пользователя {user_id}")
+                
+                # Очищаем завершенные задачи
+                tasks_to_remove = []
+                for user_id in self.user_processing_tasks:
                     if self.user_processing_tasks[user_id].done():
-                        del self.user_processing_tasks[user_id]
+                        tasks_to_remove.append(user_id)
+                
+                for user_id in tasks_to_remove:
+                    del self.user_processing_tasks[user_id]
+                    logger.debug(f"Удалена завершенная задача пользователя {user_id}")
 
 # Глобальный экземпляр менеджера состояния
 user_state = UserStateManager()
