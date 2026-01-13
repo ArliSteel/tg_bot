@@ -1,4 +1,4 @@
-aiohttp==3.12.15
+aiohttp==3.13.3
 python-telegram-bot==22.3
 httpx==0.28.1
 pydub==0.25.1
